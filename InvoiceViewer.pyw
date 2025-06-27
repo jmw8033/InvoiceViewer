@@ -72,14 +72,14 @@ class InvoiceViewer(tk.Tk):
 
         with conn.cursor(as_dict=True) as cur:
             cur.execute("""
-                SELECT CH.CheckNum, CH.CheckDate, CD.InvoiceNum
+                SELECT CH.CheckNum, CH.CheckDate, CD.InvoiceNum, CD.Amount, CH.VendorID
                 FROM Check_Header CH
                 JOIN Check_Detail CD ON CH.CheckID = CD.CheckID
             """)
             data=cur.fetchall()
         self.checks_by_invoice = defaultdict(list)
         for row in data:
-            self.checks_by_invoice[row["InvoiceNum"]].append((row["CheckNum"], row["CheckDate"]))
+            self.checks_by_invoice[row["InvoiceNum"]].append((row["CheckNum"], row["CheckDate"], row["Amount"], row["VendorID"]))
         conn.close()
 
 
@@ -108,7 +108,7 @@ class InvoiceViewer(tk.Tk):
 
 
     def create_filter_frame(self):
-        self.filter_frame = ttk.Frame(self, border=1)
+        self.filter_frame = ttk.Frame(self, border=2)
         self.filter_frame.pack(fill='x', padx=10, pady=10, side="top")
 
         # Search bar
@@ -125,6 +125,8 @@ class InvoiceViewer(tk.Tk):
         self.start_entry.set_date("01/01/2014")
         self.start_entry.grid(row=0, column=3, padx=5)
         self.end_entry.grid(row=0, column=5, padx=5)
+        self.start_entry.bind("<<DateEntrySelected>>", self.company_entry.on_select)
+        self.end_entry.bind("<<DateEntrySelected>>", self.company_entry.on_select)
 
         # PDF Only Checkbox
         self.pdf_only = tk.BooleanVar()
@@ -145,7 +147,7 @@ class InvoiceViewer(tk.Tk):
         self.tree = ttk.Treeview(self.tree_frame, columns=("Invoice", "Date", "Invoice Amount", "Balance", 
                                                            "Check Number", "Check Date", "File Available", "Filepath"), show='tree headings')
         self.tree.column("#0", width=0, stretch=False)
-        self.tree.column("Invoice", width=100, anchor="center")
+        self.tree.column("Invoice", width=110, anchor="center")
         self.tree.column("Date", width=40, anchor="center")
         self.tree.column("Invoice Amount", width=50, anchor="center")
         self.tree.column("Balance", width=50, anchor="center")
@@ -170,10 +172,10 @@ class InvoiceViewer(tk.Tk):
         self.tree.configure(yscrollcommand=scrollbar.set)
 
         # Styles
-        self.style.configure("Treeview", rowheight=22)         # taller lines
-        self.style.map("Treeview", background=[("selected", "#cce6ff")])
+        self.style.configure("Treeview", rowheight=20) 
         self.tree.tag_configure("oddrow",  background="#f7f7f7")
         self.tree.tag_configure("evenrow", background="#ffffff")
+        self.tree.tag_configure("checkrow", background="#fdfaf1")
 
 
     def create_footer_frame(self):
@@ -224,6 +226,7 @@ class AutoCompleteEntry(tk.Entry):
         self.bind("<Up>", lambda x: self.listbox_move("up"))
         self.bind("<Down>", lambda x: self.listbox_move("down"))
         self.bind("<Escape>", self.close_listbox)
+        self.tree.bind("<ButtonPress-1>", self.toggle_checks, True)
         self.tree.bind("<Double-1>", self.open_file)
 
 
@@ -244,7 +247,7 @@ class AutoCompleteEntry(tk.Entry):
             self.listbox.column("#0", width=0, stretch=False)
             self.listbox.column("id", width=80)
             self.listbox.column("name", width=300)
-            self.listbox.bind("<ButtonRelease-1>", self.on_select)
+            self.listbox.bind("<ButtonPress-1>", self.on_select)
             self.listbox.bind("<Return>", self.on_select)
             self.listbox.bind("<Up>", lambda: self.listbox_move("up"))
             self.listbox.bind("<Down>", lambda: self.listbox_move("down"))
@@ -265,8 +268,11 @@ class AutoCompleteEntry(tk.Entry):
         if self.listbox: 
             selection = self.listbox.selection()
             if selection:
-                id, name = self.listbox.item(selection[0], "values")
-                self.text.set(id)
+                self.text.set(self.listbox.item(selection[0], "values")[0])
+            else:
+                items = self.listbox.get_children()
+                if len(items) == 1:
+                    self.text.set(self.listbox.item(items[0], "values")[0])
 
         company = self.text.get()
         if company not in dict(self.company_ids):
@@ -284,10 +290,11 @@ class AutoCompleteEntry(tk.Entry):
                 date = entry["InvoiceDate"].date()
                 if date < self.root.start_entry.get_date() or date > self.root.end_entry.get_date():
                     continue
+                date = date.strftime("%m-%d-%Y")
 
                 # Check if Has File Only is checked
                 filepath = entry.get("Filepath", "")
-                has_filepath = "Yes" if filepath else ""
+                has_filepath = "✔" if filepath else ""
                 if self.root.pdf_only.get() == 1 and not has_filepath:
                     continue
 
@@ -298,7 +305,7 @@ class AutoCompleteEntry(tk.Entry):
                 
                 checks = self.root.checks_by_invoice[invoice]
                 if len(checks) == 1:
-                    check_number, check_date = checks[0]
+                    check_number, check_date, _, _ = checks[0]
                     check_date = check_date.strftime("%m-%d-%Y")
 
                 # Get Balance
@@ -312,9 +319,20 @@ class AutoCompleteEntry(tk.Entry):
                     
                 # If duplicate invoice, add random int to end of invoice
                 tag = "evenrow" if i % 2 == 0 else "oddrow"
-                self.tree.insert("", "end", iid=f"{invoice}_{os.urandom(4).hex()}", 
-                                 values=(invoice, date.strftime("%m-%d-%Y"), amount, balance, check_number, check_date,
+                iid = f"{invoice}_{os.urandom(4).hex()}"
+                invoice = self.tree.insert("", "end", iid=iid, 
+                                 values=(invoice, date, amount, balance, check_number, check_date,
                                         has_filepath, filepath), tags=tag)
+                
+                # Add subrows for checks
+                if len(checks) > 1:
+                    self.tree.set(iid, "Check Number", "▼")
+                    for number, date, amount, vendor in checks:
+                        if vendor != company:
+                            continue
+                        date = date.strftime("%m-%d-%Y")
+                        amount = f"${amount:,.2f}" if amount >= 0 else f"(${abs(amount):,.2f})"
+                        self.tree.insert(invoice, "end", values=("", "", "", amount, number, date, ""), tags="checkrow")
                 invoice_count += 1
             except Exception as e:
                 print(f"Error processing entry {entry}: {e}")
@@ -348,6 +366,17 @@ class AutoCompleteEntry(tk.Entry):
         self.listbox.selection_set(rows[i])
         self.listbox.focus(rows[i])
         self.listbox.see(rows[i])
+
+
+    def toggle_checks(self, event):
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        
+        if self.tree.get_children(row):
+            is_open = self.tree.item(row, "open")
+            self.tree.item(row, open=not is_open)
+        return "break"
 
 
     def close_listbox(self, *_):
