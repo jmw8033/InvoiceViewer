@@ -6,6 +6,8 @@ from datetime import datetime, date
 import os
 import pymssql
 import time
+import threading
+from PIL import Image, ImageTk
 
 INVOICE_DIR = r"S:\Titan_DM\Titan_Filing\AP_Invoices"
 
@@ -13,7 +15,8 @@ class InvoiceViewer(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Titan Invoice Viewer")
-        self.geometry("900x600")
+        self.iconbitmap( "icon.ico")
+        self.geometry("1020x700")
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
 
@@ -23,7 +26,12 @@ class InvoiceViewer(tk.Tk):
         self.sort_col = "Date"
         self.sort_desc = True # descending
 
-        # Load Data
+        self.loading_label = ttk.Label(self, text="Loading Titan invoices...\nPlease wait 10-20 seconds")
+        self.loading_label.pack(expand=True)
+        self.after(100, lambda: threading.Thread(target=self.load_data, daemon=True).start())
+
+
+    def load_data(self):
         print("Loading data...")
         start_time = time.perf_counter()
         self.load_database()
@@ -32,15 +40,21 @@ class InvoiceViewer(tk.Tk):
 
         # Check for errors
         if self.error_count > 0:
-            print(f"{self.error_count} errors.")
+            print(f"{self.error_count} missing file matches.")
         print(f"Data loaded in {end_time - start_time:.2f} seconds.")
 
+        self.after(0, self.load_gui)
+
+    
+    def load_gui(self):
+        self.loading_label.destroy()
         # Create Frames
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+
         self.create_treeview()
         self.create_filter_frame()
         self.create_footer_frame()
-
-        self.mainloop()
 
 
     def load_database(self):
@@ -63,10 +77,10 @@ class InvoiceViewer(tk.Tk):
         
         self.invoices = [row for row in data if row["VendorID"] and row["InvoiceNum"] and row["InvoiceDate"] 
                           and row["Subtotal"] is not None and row["Payments"] is not None]
-        self.broken_companies = [row for row in data if not (row["VendorID"] and row["InvoiceNum"] and row["InvoiceDate"] 
-                                 and row["Subtotal"] is not None and row["Payments"] is not None)]
-        [print(row) for row in self.broken_companies]
-        print(f"{len(self.broken_companies)} broken entries found.")
+        #self.broken_companies = [row for row in data if not (row["VendorID"] and row["InvoiceNum"] and row["InvoiceDate"] 
+        #                         and row["Subtotal"] is not None and row["Payments"] is not None)]
+        #[print(row) for row in self.broken_companies]
+        #print(f"{len(self.broken_companies)} broken entries found.")
         self.company_ids = {(row["VendorID"], row["CompanyName"]) for row in self.invoices if row["VendorID"] and row["CompanyName"]}
         self.by_vendor_invoice = {(row["VendorID"], row["InvoiceNum"]): row for row in self.invoices}
 
@@ -108,10 +122,11 @@ class InvoiceViewer(tk.Tk):
 
 
     def create_filter_frame(self):
-        self.filter_frame = ttk.Frame(self, border=2)
-        self.filter_frame.pack(fill='x', padx=10, pady=10, side="top")
+        self.filter_frame = ttk.Frame(self, height=60)
+        self.filter_frame.grid(row=0, column=0, sticky="ew")
+        self.filter_frame.grid_propagate(False)
 
-        # Search bar
+        # Company Search bar
         ttk.Label(self.filter_frame, text="Company ID:").grid(row=0, column=0, padx=5)
         self.company_entry = AutoCompleteEntry(self)
         self.company_entry.grid(row=0, column=1, padx=5, pady=5)
@@ -130,23 +145,36 @@ class InvoiceViewer(tk.Tk):
 
         # PDF Only Checkbox
         self.pdf_only = tk.BooleanVar()
-        self.checkbutton = ttk.Checkbutton(self.filter_frame, text="File Available Only", variable=self.pdf_only, command=self.company_entry.on_select, takefocus=False)
-        self.checkbutton.grid(row=0, column=6, padx=5)
+        self.pdf_cb = ttk.Checkbutton(self.filter_frame, text="File Available Only", variable=self.pdf_only, command=self.company_entry.on_select, takefocus=False)
+        self.pdf_cb.grid(row=0, column=6, padx=5)
+
+        # All companies checkbox
+        self.all_companies = tk.BooleanVar()
+        self.all_companies_cb = ttk.Checkbutton(self.filter_frame, text="Search All Companies (Slow)", variable=self.all_companies, command=self.company_entry.toggle_all_companies, takefocus=False)
+        self.all_companies_cb.grid(row=0, column=7, padx=5)
+
+        # Invoice search
+        ttk.Label(self.filter_frame, text="Invoice:").grid(row=1, column=0, padx=5)
+        self.invoice_entry = tk.Entry(self.filter_frame)
+        self.invoice_entry.grid(row=1, column=1, padx=5)
+        self.invoice_text = tk.StringVar()
+        self.invoice_entry["textvariable"] = self.invoice_text
+        self.invoice_text.trace_add("write", self.company_entry.on_select)
 
         # Amount found label
         self.amount_label = ttk.Label(self.filter_frame, text="")
-        self.amount_label.grid(row=1, column=0, padx=5, columnspan=3, sticky="w")
-
+        self.amount_label.grid(row=1, column=2, padx=5, columnspan=3, sticky="w")
 
 
     def create_treeview(self):
-        self.tree_frame = ttk.Frame(self)
-        self.tree_frame.pack(expand=True, fill='both', padx=10, pady=5, side="bottom")
+        self.tree_frame = ttk.Frame(self, height=600)
+        self.tree_frame.grid(row=1, column=0, sticky="nsew")
 
         # Column setup
-        self.tree = ttk.Treeview(self.tree_frame, columns=("Invoice", "Date", "Invoice Amount", "Balance", 
+        self.tree = ttk.Treeview(self.tree_frame, columns=("Vendor", "Invoice", "Date", "Invoice Amount", "Balance", 
                                                            "Check Number", "Check Date", "File Available", "Filepath"), show='tree headings')
         self.tree.column("#0", width=0, stretch=False)
+        self.tree.column("Vendor", width=50, anchor="center")
         self.tree.column("Invoice", width=110, anchor="center")
         self.tree.column("Date", width=40, anchor="center")
         self.tree.column("Invoice Amount", width=50, anchor="center")
@@ -156,6 +184,7 @@ class InvoiceViewer(tk.Tk):
         self.tree.column("File Available", width=30, anchor="center")
         self.tree.column("Filepath", width=0, stretch=False)
 
+        self.tree.heading("Vendor", text="Vendor", command=lambda: self.sort_by("Vendor"))
         self.tree.heading("Invoice", text="Invoice", command=lambda: self.sort_by("Invoice"))
         self.tree.heading("Date", text="Date  ▼", command=lambda: self.sort_by("Date"))
         self.tree.heading("Invoice Amount", text="Invoice Amount", command=lambda: self.sort_by("Invoice Amount"))
@@ -179,7 +208,24 @@ class InvoiceViewer(tk.Tk):
 
 
     def create_footer_frame(self):
-        pass
+        self.footer_frame = tk.Frame(self, height=20)
+        self.footer_frame.grid(row=2, column=0, sticky="sew")
+        self.footer_frame.grid_propagate(False)
+
+        about_text = """Welcome to Titan Invoice Viewer, here are some useful notes
+- Double left-click a row to open the invoice file if it is available
+- Left-click the ▼ in the Check Number column to display all associated checks
+- Left-click a column header to sort by that column, click again to swap direction
+- All questions and suggestions can be directed to jmwesthoff@atlanticconcrete.com"""
+
+        about_label = ttk.Label(self.footer_frame, text=about_text, font=("TkDefaultFont", 11))
+        about_label.pack(padx=10, anchor="n", side="left", fill="x", expand=True)
+        logo_image = Image.open("logo.png")
+        logo_image = logo_image.resize((100, 100))
+        self.logo = ImageTk.PhotoImage(logo_image)
+        logo_label = ttk.Label(self.footer_frame, image=self.logo)
+        logo_label.pack(padx=5, side="right")
+        
 
     
     def sort_by(self, col):
@@ -221,7 +267,7 @@ class AutoCompleteEntry(tk.Entry):
         self.text = tk.StringVar()
         self["textvariable"] = self.text 
 
-        self.text.trace_add("write", self.show_suggestions)
+        self.text_trace = self.text.trace_add("write", self.show_suggestions)
         self.bind("<Return>", self.on_select)
         self.bind("<Up>", lambda x: self.listbox_move("up"))
         self.bind("<Down>", lambda x: self.listbox_move("down"))
@@ -247,7 +293,7 @@ class AutoCompleteEntry(tk.Entry):
             self.listbox.column("#0", width=0, stretch=False)
             self.listbox.column("id", width=80)
             self.listbox.column("name", width=300)
-            self.listbox.bind("<ButtonPress-1>", self.on_select)
+            self.listbox.bind("<ButtonRelease-1>", self.on_select)
             self.listbox.bind("<Return>", self.on_select)
             self.listbox.bind("<Up>", lambda: self.listbox_move("up"))
             self.listbox.bind("<Down>", lambda: self.listbox_move("down"))
@@ -258,34 +304,46 @@ class AutoCompleteEntry(tk.Entry):
             self.listbox.insert("", tk.END, values=(w[0], w[1]))
 
         # position the listbox just under the entry widget
-        x = self.winfo_x() + 10
+        x = self.winfo_x() + 5
         y = self.winfo_y() + self.winfo_height() + 11
         self.listbox.place(x=x, y=y)
 
 
     def on_select(self, *_):
         # Get selected company and update treeview
-        if self.listbox: 
-            selection = self.listbox.selection()
-            if selection:
-                self.text.set(self.listbox.item(selection[0], "values")[0])
-            else:
-                items = self.listbox.get_children()
-                if len(items) == 1:
-                    self.text.set(self.listbox.item(items[0], "values")[0])
+        if not self.root.all_companies.get():
+            if self.listbox: 
+                selection = self.listbox.selection()
+                if selection:
+                    self.text.set(self.listbox.item(selection[0], "values")[0])
+                else:
+                    items = self.listbox.get_children()
+                    if len(items) == 1:
+                        self.text.set(self.listbox.item(items[0], "values")[0])
 
-        company = self.text.get()
-        if company not in dict(self.company_ids):
-            return
+            company = self.text.get()
+            if company not in dict(self.company_ids):
+                return
+        else:
+            company = self.text.get()
+
+        invoice_prefix = self.root.invoice_text.get()
         
         # Update treeview with invoices for selected company
         invoice_count = 0
         for row in self.tree.get_children():
             self.tree.delete(row)
         for i, entry in enumerate(self.invoices):
-            if entry["VendorID"] != company:
+            if self.root.all_companies.get() and not entry["VendorID"].startswith(company):
+                continue
+            if not self.root.all_companies.get() and entry["VendorID"] != company:
                 continue
             try:
+                # Check invoice prefix
+                invoice = entry["InvoiceNum"]
+                if not invoice.startswith(invoice_prefix):
+                    continue
+
                 # Check if invoice date is between start and end dates
                 date = entry["InvoiceDate"].date()
                 if date < self.root.start_entry.get_date() or date > self.root.end_entry.get_date():
@@ -295,11 +353,11 @@ class AutoCompleteEntry(tk.Entry):
                 # Check if Has File Only is checked
                 filepath = entry.get("Filepath", "")
                 has_filepath = "✔" if filepath else ""
-                if self.root.pdf_only.get() == 1 and not has_filepath:
+                if self.root.pdf_only.get() and not has_filepath:
                     continue
 
-                invoice = entry["InvoiceNum"]
-                amount = entry['Subtotal']
+                amount = entry["Subtotal"]
+                vendor = entry["VendorID"]
                 check_number = ""
                 check_date= ""
                 
@@ -321,18 +379,18 @@ class AutoCompleteEntry(tk.Entry):
                 tag = "evenrow" if i % 2 == 0 else "oddrow"
                 iid = f"{invoice}_{os.urandom(4).hex()}"
                 invoice = self.tree.insert("", "end", iid=iid, 
-                                 values=(invoice, date, amount, balance, check_number, check_date,
+                                 values=(vendor, invoice, date, amount, balance, check_number, check_date,
                                         has_filepath, filepath), tags=tag)
                 
                 # Add subrows for checks
                 if len(checks) > 1:
                     self.tree.set(iid, "Check Number", "▼")
-                    for number, date, amount, vendor in checks:
-                        if vendor != company:
+                    for number, date, amount, ven in checks:
+                        if vendor != ven:
                             continue
                         date = date.strftime("%m-%d-%Y")
                         amount = f"${amount:,.2f}" if amount >= 0 else f"(${abs(amount):,.2f})"
-                        self.tree.insert(invoice, "end", values=("", "", "", amount, number, date, ""), tags="checkrow")
+                        self.tree.insert(invoice, "end", values=("", "", "", "", amount, number, date, ""), tags="checkrow")
                 invoice_count += 1
             except Exception as e:
                 print(f"Error processing entry {entry}: {e}")
@@ -373,10 +431,26 @@ class AutoCompleteEntry(tk.Entry):
         if not row:
             return
         
+        col_num = self.tree.identify_column(event.x)
+        col = self.tree.heading(col_num)["text"]
+        if col != "Check Number":
+            return
+        
         if self.tree.get_children(row):
             is_open = self.tree.item(row, "open")
             self.tree.item(row, open=not is_open)
         return "break"
+    
+
+    def toggle_all_companies(self):
+        if self.root.all_companies.get():
+            self.text.set("")
+            self.text.trace_remove("write", self.text_trace)
+            self.text_trace = self.text.trace_add("write", self.on_select)
+        else:
+            self.text.trace_remove("write", self.text_trace)
+            self.text_trace = self.text.trace_add("write", self.show_suggestions)
+        self.on_select()
 
 
     def close_listbox(self, *_):
@@ -404,4 +478,5 @@ class AutoCompleteEntry(tk.Entry):
             messagebox.showerror("Error", f"Failed to open file: {e}")
 
 if __name__ == "__main__":
-    InvoiceViewer = InvoiceViewer()
+    invoice_viewer = InvoiceViewer()
+    invoice_viewer.mainloop()
