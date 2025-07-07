@@ -446,8 +446,8 @@ class AutoCompleteEntry(tk.Entry):
         self.bind("<Up>", lambda *_: self.listbox_move("up"))
         self.bind("<Down>", lambda *_: self.listbox_move("down"))
         self.bind("<Escape>", self.close_listbox)
-        self.tree.bind("<ButtonPress-1>", self.toggle_checks, True)
-        self.tree.bind("<Double-1>", self.open_file)
+        self.tree.bind("<ButtonPress-1>", self.on_row_click, True)
+        #self.tree.bind("<Double-1>", self.open_file)
 
 
     def show_suggestions(self, *_):
@@ -547,7 +547,10 @@ class AutoCompleteEntry(tk.Entry):
         self.listbox.see(rows[i])
 
 
-    def toggle_checks(self, event):
+    def on_row_click(self, event):
+        if self.tree.identify_region(event.x, event.y) != "cell":
+            return
+    
         row = self.tree.identify_row(event.y)
         if not row:
             return
@@ -555,12 +558,20 @@ class AutoCompleteEntry(tk.Entry):
         col_num = self.tree.identify_column(event.x)
         col = self.tree.heading(col_num)["text"]
         if col != "Check Number" and col != "Check Number  ▲" and col != "Check Number  ▼":
-            return
-        
+            self.open_file()
+        else:
+            self.toggle_checks(row)
+            return "break"
+
+
+    def toggle_checks(self, row):
         if self.tree.get_children(row):
             is_open = self.tree.item(row, "open")
+            if is_open:
+                self.tree.set(row, "Check Number", "▼")
+            else:
+                self.tree.set(row, "Check Number", "▲")
             self.tree.item(row, open=not is_open)
-        return "break"
     
 
     def toggle_all_companies(self):
@@ -579,7 +590,7 @@ class AutoCompleteEntry(tk.Entry):
             self.listbox = None
 
     
-    def open_file(self, event):
+    def open_file(self):
         try:
             selection = self.tree.selection()
             if not selection:
@@ -596,7 +607,6 @@ class AutoCompleteEntry(tk.Entry):
             os.startfile(filepath)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open file: {e}")
-        return "break"
 
 
 class ErrorPopup(tk.Toplevel):
