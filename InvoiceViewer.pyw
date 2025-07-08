@@ -104,7 +104,6 @@ class InvoiceViewer(tk.Tk):
         self.create_filter_frame()
         self.error_popup = ErrorPopup(self, self.broken_companies, self.broken_invoices, self.missing_invoices)
         self.help_popup = HelpPopup(self)
-        self.bind("<space>", lambda *_: self.error_popup.toggle())
 
 
     def load_database(self):
@@ -210,6 +209,8 @@ class InvoiceViewer(tk.Tk):
         self.start_entry.grid(row=0, column=3, padx=5)
         self.end_entry.grid(row=0, column=5, padx=5)
         self.start_entry.bind("<<DateEntrySelected>>", self.company_entry.on_select)
+        self.start_entry.bind("<Return>", self.company_entry.on_select)
+        self.end_entry.bind("<Return>", self.company_entry.on_select)
         self.end_entry.bind("<<DateEntrySelected>>", self.company_entry.on_select)
 
         # PDF Only Checkbox
@@ -224,7 +225,11 @@ class InvoiceViewer(tk.Tk):
 
         # Help button
         self.help_button = tk.Button(self.filter_frame, text="Help", command=lambda *_: self.help_popup.toggle())
-        self.help_button.place(x=1175, y=5)
+        self.help_button.place(x=1135, y=5)
+        
+        # Errors button
+        self.errors_button = tk.Button(self.filter_frame, text="Errors", command=lambda *_: self.error_popup.toggle())
+        self.errors_button.place(x=1175, y=5)
 
         # Invoice search
         ttk.Label(self.filter_frame, text="Invoice:").grid(row=1, column=0, padx=5)
@@ -375,11 +380,12 @@ class InvoiceViewer(tk.Tk):
 
 
     def sort_by(self, col, values=None):
-        if col == self.sort_col:
-            self.sort_desc = not self.sort_desc
-        else:
-            self.sort_col = col
-            self.sort_desc = True
+        if not values:
+            if col == self.sort_col:
+                self.sort_desc = not self.sort_desc
+            else:
+                self.sort_col = col
+                self.sort_desc = True
 
         if not values:
             values = [self.tree.item(i, "values") for i in self.tree.get_children()]
@@ -619,6 +625,7 @@ class ErrorPopup(tk.Toplevel):
         self.attributes("-topmost", True)
         self.protocol("WM_DELETE_WINDOW", self.toggle)
         self.bind("<space>", self.toggle)
+        self.geometry("750x400")
 
         frame = tk.Frame(self)
         frame.pack(expand=True, fill="both")
@@ -673,9 +680,14 @@ class HelpPopup(tk.Toplevel):
         self.withdraw()
         self.attributes("-topmost", True)
         self.protocol("WM_DELETE_WINDOW", self.toggle)
+        self.bind("<space>", self.toggle)
+        self.geometry("700x200")
 
         frame = tk.Frame(self)
         frame.pack(expand=True, fill="both")
+
+        self.text = scrolledtext.ScrolledText(frame, font=font.Font(family="Consolas", size=9), wrap="none")
+        self.text.pack(expand=True, fill="both")
 
         about_text = """Welcome to Titan Invoice Viewer, here are some useful tips for operating this program
 - Enter a company ID into the search bar to view all invoices for that company
@@ -685,11 +697,11 @@ class HelpPopup(tk.Toplevel):
 - Double left-click a row to open the invoice file if it is available
 - Left-click a column header to sort by that column, click again to swap direction
 - Left-click the ▼ in the Check Number column to display all associated checks
-- Press space to open and close an error tab to see broken Titan entries and invoice files
-- All questions and suggestions can be directed to jmwesthoff@atlanticconcrete.com"""
-        tk.Label(frame, text=about_text, justify="left", font=("Consolas", 12)).pack(anchor="w")
 
-    
+All questions and suggestions can be directed to jmwesthoff@atlanticconcrete.com"""
+        self.text.insert(tk.END, about_text)
+
+
     def toggle(self, *_):
         if self.state() == "withdrawn":
             self.show()
