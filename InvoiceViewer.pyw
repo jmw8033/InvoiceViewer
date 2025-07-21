@@ -1,11 +1,11 @@
-from tkinter import ttk, messagebox, scrolledtext, font
+from tkinter import ttk, messagebox, scrolledtext, font, simpledialog
 from tkcalendar import DateEntry
 from collections import defaultdict
 from datetime import datetime
 from PIL import Image, ImageTk
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
-import os, pymssql, time, threading, re, queue
+import os, pymssql, time, threading, re, queue, sys, json
 
 
 INVOICE_DIR = r"S:\Titan_DM\Titan_Filing\AP_Invoices"
@@ -15,11 +15,17 @@ class InvoiceViewer(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Titan Invoice Viewer")
-        self.iconbitmap( "icon.ico")
-        self.geometry("1220x700")
+        self.iconbitmap(default="icon.ico")
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
+        self.tk.call("tk", "scaling", 1.33)
         self.gui_queue = queue.Queue()
+
+        geom = os.environ.pop("GEOM", "")
+        if geom:
+            self.geometry(geom)
+        else:
+            self.geometry("1220x700")
 
         self.invoices = {} # List of dictionaries, {"VendorID", "InvoiceNum", "InvoiceDate", "ExtAmount", "Filepath"}
         self.company_ids = set() # Set of company IDs for quick lookup
@@ -31,23 +37,35 @@ class InvoiceViewer(tk.Tk):
         self.checks_by_invoice = []
         self.missing_invoices = []
 
+        # Ignore list for private vendors
+        self.ignoring = True
+        self.ignore_list = set()
+        with open("ignore.json", "r") as f:
+            self.ignore_list = set(json.load(f))
+        self.protocol("WM_DELETE_WINDOW", self.on_exit)  # runs exit protocol on window closed
+
         # Loading info
-        photoimage = ImageTk.PhotoImage(Image.open("logo.png").resize((800, 700)))
+        self.create_loading_screen()
+
+        # Get data
+        self.after(0, lambda: threading.Thread(target=self.load_data, daemon=True).start())
+        self.after(50, self.loading_loop)
+
+
+    def create_loading_screen(self):
+        self.loading_bg = ImageTk.PhotoImage(Image.open("logo.png").resize((800, 700)))
         self.loading_canvas = tk.Canvas(self, bg="white", width=1220, height=700)
         self.loading_canvas.pack(expand=True, fill="both", side="top", anchor="w")
-        self.loading_canvas.background = photoimage
-        self.loading_canvas.create_image(1220/2, 0, anchor="n", image=photoimage)
+        self.loading_canvas.background = self.loading_bg
+        self.loading_canvas.create_image(1220/2, 0, anchor="n", image=self.loading_bg)
         
         tk.Label(self.loading_canvas, text="Welcome to Titan Invoice Viewer", font=("TKDefaultFont", 24, "bold"), bg="white").pack(side="top", anchor="w")
         tk.Label(self.loading_canvas, text="Please press the Help button for more information about this program", font=("TKDefaultFont", 20), bg="white").pack(side="top", anchor="w")
         tk.Label(self.loading_canvas, text="Loading Titan invoices, Please wait...", font=("TKDefaultFont", 16), bg="white").pack(side="top", anchor="w")
 
-        self.after(0, lambda: threading.Thread(target=self.load_data, daemon=True).start())
-        self.after(50, self.loading_loop)
-
 
     def loading_update(self, msg, color="#000000"):
-        print(msg)
+        #print(msg)
         self.gui_queue.put((msg, color))
 
 
@@ -77,7 +95,7 @@ class InvoiceViewer(tk.Tk):
             try:
                 row["Filepath"] = file_index.pop((row["VendorID"], row["InvoiceNum"]))
             except:
-                self.missing_invoices.insert(0, row["VendorID"] + " - " + row["InvoiceNum"] + " - " + row["InvoiceDate"].strftime("%m-%d-%Y"))
+                self.missing_invoices.append((row["VendorID"], row["InvoiceNum"], row["InvoiceDate"].strftime("%m-%d-%Y")))
         t1 = time.perf_counter()
         self.loading_update(f"Invoice files loaded in {t1 - t0:.2f} seconds.")
         self.loading_update((f"{len(self.broken_companies)} broken titan entries found."), color="#FF0000")
@@ -105,6 +123,12 @@ class InvoiceViewer(tk.Tk):
         self.error_popup = ErrorPopup(self, self.broken_companies, self.broken_invoices, self.missing_invoices)
         self.help_popup = HelpPopup(self)
 
+        # Ignore list image
+        self.ignore_photo = ImageTk.PhotoImage(Image.open("leaf.png").resize((13, 13)))
+        self.ignore_label = tk.Label(self.filter_frame, image=self.ignore_photo)
+        self.bind("<Control-F9>", self.add_ignore)
+        self.bind("<Control-F10>", self.toggle_ignore_list)
+
 
     def load_database(self):
         def load_header():
@@ -124,12 +148,12 @@ class InvoiceViewer(tk.Tk):
                     JOIN Vendors V ON APH.VendorID = V.VendorId
                 """)
                 data = cur.fetchall()
-            
+
             self.invoices = [row for row in data if row["VendorID"] and row["InvoiceNum"] and row["InvoiceDate"] 
                             and row["Subtotal"] is not None and row["Payments"] is not None]
             self.broken_companies = [row for row in data if not (row["VendorID"] and row["InvoiceNum"] and row["InvoiceDate"] 
                                      and row["Subtotal"] is not None and row["Payments"] is not None)]
-            self.company_ids = {(row["VendorID"], row["CompanyName"]) for row in self.invoices if row["VendorID"] and row["CompanyName"]}
+            self.company_ids = {(row["VendorID"], row["CompanyName"], row["VendorID"] in self.ignore_list) for row in self.invoices if row["VendorID"] and row["CompanyName"]}
             self.by_vendor_invoice = {(row["VendorID"], row["InvoiceNum"]): row for row in self.invoices}
 
             t1 = time.perf_counter()
@@ -153,9 +177,9 @@ class InvoiceViewer(tk.Tk):
                     JOIN Check_Detail CD ON CH.CheckID = CD.CheckID
                 """)
                 data=cur.fetchall()
-            self.checks_by_invoice = defaultdict(list)
+            self.checks_by_vendor_invoice = defaultdict(list)
             for row in data:
-                self.checks_by_invoice[row["InvoiceNum"]].append((row["CheckNum"], row["CheckDate"], row["Amount"], row["VendorID"]))
+                self.checks_by_vendor_invoice[(row["VendorID"], row["InvoiceNum"])].append((row["CheckNum"], row["CheckDate"], row["Amount"]))
             conn.close()
             t1 = time.perf_counter()
             self.loading_update(f"Check data loaded in {t1 - t0:.2f} seconds.")
@@ -223,9 +247,13 @@ class InvoiceViewer(tk.Tk):
         self.all_companies_cb = ttk.Checkbutton(self.filter_frame, text="Search All Companies", variable=self.all_companies, command=self.company_entry.toggle_all_companies, takefocus=False)
         self.all_companies_cb.grid(row=0, column=7, padx=5)
 
+        # Refresh button
+        self.refresh_button = tk.Button(self.filter_frame, text="⭮", command=self.restart)
+        self.refresh_button.place(x=1111, y=5)
+
         # Help button
         self.help_button = tk.Button(self.filter_frame, text="Help", command=lambda *_: self.help_popup.toggle())
-        self.help_button.place(x=1135, y=5)
+        self.help_button.place(x=1136, y=5)
         
         # Errors button
         self.errors_button = tk.Button(self.filter_frame, text="Errors", command=lambda *_: self.error_popup.toggle())
@@ -308,7 +336,7 @@ class InvoiceViewer(tk.Tk):
         for entry in self.invoices:
             vendor = entry["VendorID"]
             
-            if self.all_companies.get() and not vendor.lower().startswith(company.lower()):
+            if (self.all_companies.get() and not vendor.startswith(company)) or (self.ignoring and vendor in self.ignore_list):
                 continue
             if not self.all_companies.get() and vendor != company:
                 continue
@@ -333,9 +361,9 @@ class InvoiceViewer(tk.Tk):
             check_date= ""
 
             # Add subrows for checks
-            checks = self.checks_by_invoice[invoice]
+            checks = self.checks_by_vendor_invoice[(vendor, invoice)]
             if len(checks) == 1:
-                check_number, check_date, _, _ = checks[0]
+                check_number, check_date, _ = checks[0]
                 check_date = check_date.strftime("%m-%d-%Y")
 
             # Get Balance
@@ -379,17 +407,17 @@ class InvoiceViewer(tk.Tk):
         return len(self.tree.get_children())
 
 
-    def sort_by(self, col, values=None):
-        if not values:
+    def sort_by(self, col, values=None, header_pressed=True):
+        if header_pressed:
             if col == self.sort_col:
                 self.sort_desc = not self.sort_desc
             else:
                 self.sort_col = col
-                self.sort_desc = True
+                self.sort_desc = True   
 
         if not values:
             values = [self.tree.item(i, "values") for i in self.tree.get_children()]
-        self.tree.delete(*self.tree.get_children())
+            self.tree.delete(*self.tree.get_children())
 
         def invoice_key(inv):
             if inv.isdigit():
@@ -409,7 +437,7 @@ class InvoiceViewer(tk.Tk):
             "File Available": lambda x: x[8]
         }
         reverse = self.sort_desc
-        if col == "Vendor" or col == "Invoice":
+        if col == "Vendor" or col == "Invoice" or col == "Company Name":
             reverse = not reverse
 
         values.sort(key=keymap[col], reverse=reverse)
@@ -419,11 +447,9 @@ class InvoiceViewer(tk.Tk):
             iid = self.tree.insert("", "end", values=row, tags=tag)
 
             # Add subrows for checks
-            checks = self.checks_by_invoice[row[2]]
+            checks = self.checks_by_vendor_invoice[(row[0], row[2])]
             if len(checks) > 1:
-                for cnum, cdate, camt, ven in checks:
-                    if row[0] != ven:
-                        continue
+                for cnum, cdate, camt in checks:
                     self.tree.set(iid, "Check Number", "▼")
                     cdate = cdate.strftime("%m-%d-%Y")
                     camt = f"${camt:,.2f}" if camt >= 0 else f"(${abs(camt):,.2f})"
@@ -434,6 +460,44 @@ class InvoiceViewer(tk.Tk):
             text = c + arrow if c == col else c
             self.tree.heading(c, text=text)
         return "break"
+
+    
+    def restart(self):
+        # Save ignore json
+        with open("ignore.json", "w") as f:
+            json.dump(list(self.ignore_list), f)
+        
+        # Save window location so it reopens in same spot
+        w, h = self.winfo_width(),  self.winfo_height()
+        x, y = self.winfo_rootx(), self.winfo_rooty() # absolute, across all monitors
+        geom = f"{w}x{h}+{x}+{y}"
+        os.environ["GEOM"] = geom
+        os.execl(sys.executable, sys.executable, *sys.argv)
+
+
+    def toggle_ignore_list(self, event):
+        self.ignoring = not self.ignoring
+        if self.ignoring:
+            self.ignore_label.place_forget()
+        else:
+            self.ignore_label.place(x=1113, y=9)
+        self.company_entry.on_select()
+        return "break"
+
+
+    def add_ignore(self, event):
+        vendors = ", ".join([("\n" * ((i) % 7 == 0)) + s for i, s in enumerate(self.ignore_list)])
+        new_item = simpledialog.askstring("Hidden Vendors", "Current Hidden Vendors:\n" + vendors + "\n\nEnter new Vendor ID (case doesn't matter)", parent=self)
+        if new_item:
+            self.ignore_list.add(new_item.upper())
+        return "break"
+    
+
+    def on_exit(self):
+        with open("ignore.json", "w") as f:
+            json.dump(list(self.ignore_list), f)
+        self.destroy()
+
 
 class AutoCompleteEntry(tk.Entry):
     def __init__(self, root: InvoiceViewer, *a, **kw):
@@ -463,7 +527,7 @@ class AutoCompleteEntry(tk.Entry):
             self.close_listbox()
             return
 
-        matches = [w for w in self.company_ids if w[0].lower().startswith(text.lower())]
+        matches = [w for w in self.company_ids if w[0].lower().startswith(text.lower()) and (not self.root.ignoring or not w[2])]
         if not matches:
             self.close_listbox()
             return
@@ -502,16 +566,21 @@ class AutoCompleteEntry(tk.Entry):
                         self.company.set(self.listbox.item(items[0], "values")[0])
 
             company = self.company.get()
-            if company not in dict(self.company_ids):
+            if not any(company in tup for tup in self.company_ids):   
+                self.tree.delete(*self.tree.get_children())
                 return
         else:
             company = self.company.get()
+            
+        if self.root.ignoring and company in self.root.ignore_list:
+            self.tree.delete(*self.tree.get_children())
+            return
         invoice_prefix = self.root.invoice_text.get()
 
         # If user adds text, just need to filter not re add all rows
         narrow = False
-        if ((source == "company" and company.startswith(self.prev_company)) or
-            (source == "invoice" and invoice_prefix.startswith(self.root.prev_invoice_text))):
+        if ((source == "company" and company.startswith(self.prev_company) and not company == self.prev_company) or
+            (source == "invoice" and invoice_prefix.startswith(self.root.prev_invoice_text) and not invoice_prefix == self.root.prev_invoice_text)):
                 narrow = True
         self.prev_company = company
         self.root.prev_invoice_text = invoice_prefix
@@ -520,10 +589,11 @@ class AutoCompleteEntry(tk.Entry):
             # Filter current rows
             invoice_count = self.root.filter_rows(company, invoice_prefix)
         else:
+            self.tree.delete(*self.tree.get_children())
             # Update treeview with invoices for selected company
             invoice_count, values = self.root.show_invoices(company, invoice_prefix)
             # Resort
-            self.root.sort_by(self.root.sort_col, values)
+            self.root.sort_by(self.root.sort_col, values, False)
         
 
         if invoice_count == 0:
@@ -616,7 +686,7 @@ class AutoCompleteEntry(tk.Entry):
 
 
 class ErrorPopup(tk.Toplevel):
-    def __init__(self, root, terrors, ierrors, missing, **kw):
+    def __init__(self, root, terrors, ierrors, missing:list[tuple], **kw):
         super().__init__(root, **kw)
         self.root = root
         self.title("Error Page")
@@ -638,6 +708,7 @@ class ErrorPopup(tk.Toplevel):
         self.text.tag_configure("bold", font=font.Font(family="Consolas", size=12, weight="bold"))
         
         # Titan errors
+        terrors.sort(key=lambda x: x["VendorID"])
         self.text.insert(tk.END, f" {len(terrors)} Titan Invoice Errors\n", ("bold",))
         for row in terrors:
             self.text.insert(tk.END, f" -{row}\n")
@@ -648,6 +719,7 @@ class ErrorPopup(tk.Toplevel):
             self.text.insert(tk.END, f" -{row}\n")
 
         # Missing invoice files
+        missing.sort(key=lambda x: (x[0], -datetime.strptime(x[2], "%m-%d-%Y").timestamp()))
         self.text.insert(tk.END, f"\n {len(missing)} Invoices Missing Files\n", ("bold",))
         for row in missing:
             self.text.insert(tk.END, f" -{row}\n")
@@ -690,6 +762,7 @@ class HelpPopup(tk.Toplevel):
         self.text.pack(expand=True, fill="both")
 
         about_text = """Welcome to Titan Invoice Viewer, here are some useful tips for operating this program
+- All data is collected at startup, press the Refresh button to view the most up to date information
 - Enter a company ID into the search bar to view all invoices for that company
 - Selecting "Search All Companies" will show every invoice
 - It also turns the Company ID bar to a filter only showing companies starting with your entry
