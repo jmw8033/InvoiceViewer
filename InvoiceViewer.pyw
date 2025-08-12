@@ -5,7 +5,7 @@ from datetime import datetime
 from PIL import Image, ImageTk
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
-import os, pymssql, time, threading, re, queue, sys, json
+import os, pymssql, time, threading, re, queue, sys, json, gc
 
 
 INVOICE_DIR = r"S:\Titan_DM\Titan_Filing\AP_Invoices"
@@ -20,12 +20,7 @@ class InvoiceViewer(tk.Tk):
         self.style.theme_use("clam")
         self.tk.call("tk", "scaling", 1.33)
         self.gui_queue = queue.Queue()
-
-        geom = os.environ.pop("GEOM", "")
-        if geom:
-            self.geometry(geom)
-        else:
-            self.geometry("1220x700")
+        self.geometry("1220x700")
 
         self.invoices = {} # List of dictionaries, {"VendorID", "InvoiceNum", "InvoiceDate", "ExtAmount", "Filepath"}
         self.company_ids = set() # Set of company IDs for quick lookup
@@ -49,7 +44,7 @@ class InvoiceViewer(tk.Tk):
 
         # Get data
         self.after(0, lambda: threading.Thread(target=self.load_data, daemon=True).start())
-        self.after(50, self.loading_loop)
+        self.loading_loop_id = self.after(50, self.loading_loop)
 
 
     def create_loading_screen(self):
@@ -467,12 +462,25 @@ class InvoiceViewer(tk.Tk):
         with open("ignore.json", "w") as f:
             json.dump(list(self.ignore_list), f)
         
-        # Save window location so it reopens in same spot
-        w, h = self.winfo_width(),  self.winfo_height()
-        x, y = self.winfo_rootx(), self.winfo_rooty() # absolute, across all monitors
-        geom = f"{w}x{h}+{x}+{y}"
-        os.environ["GEOM"] = geom
-        os.execl(sys.executable, sys.executable, *sys.argv)
+        for w in (self.filter_frame, self.tree_frame, self.error_popup, self.help_popup):
+            w.destroy()
+        
+        self.after_cancel(self.loading_loop_id)
+        self.invoices.clear()
+        self.company_ids.clear()
+        self.sort_col = "Date"
+        self.sort_desc = True
+        self.broken_companies.clear()
+        self.broken_invoices.clear()
+        self.by_vendor_invoice.clear()
+        self.checks_by_invoice.clear()
+        self.missing_invoices.clear()
+
+        gc.collect()
+
+        self.create_loading_screen()
+        self.loading_loop_id = self.after(50, self.loading_loop)
+        threading.Thread(target=self.load_data, daemon=True).start()
 
 
     def toggle_ignore_list(self, event):
@@ -634,7 +642,7 @@ class AutoCompleteEntry(tk.Entry):
         col_num = self.tree.identify_column(event.x)
         col = self.tree.heading(col_num)["text"]
         if col != "Check Number" and col != "Check Number  ▲" and col != "Check Number  ▼":
-            self.open_file()
+            self.open_file(event)
         else:
             self.toggle_checks(row)
             return "break"
@@ -666,10 +674,20 @@ class AutoCompleteEntry(tk.Entry):
             self.listbox = None
 
     
-    def open_file(self):
+    def open_file(self, event):
         try:
             selection = self.tree.selection()
             if not selection:
+                return
+            
+            if self.tree.identify_region(event.x, event.y) != "cell":
+                return
+        
+            row = self.tree.identify_row(event.y)
+            if not row:
+                return
+            
+            if selection[0] != row:
                 return
             
             item = selection[0]
