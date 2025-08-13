@@ -330,10 +330,9 @@ class InvoiceViewer(tk.Tk):
 
         for entry in self.invoices:
             vendor = entry["VendorID"]
-            
-            if (self.all_companies.get() and not vendor.startswith(company)) or (self.ignoring and vendor in self.ignore_list):
+            if (self.all_companies.get() and not vendor.lower().startswith(company.lower())) or (self.ignoring and vendor in self.ignore_list):
                 continue
-            if not self.all_companies.get() and vendor != company:
+            if not self.all_companies.get() and vendor.lower() != company.lower():
                 continue
 
             # Check if invoice date is between start and end dates
@@ -386,11 +385,17 @@ class InvoiceViewer(tk.Tk):
     def filter_rows(self, company, invoice_prefix): # Filter current rows based on company name and invoice
         invoice_total = 0
         balance_total = 0
+        i = 1
         for row in self.tree.get_children():
             values = self.tree.item(row, "values")
             if not values[0].lower().startswith(company.lower()) or not values[2].lower().startswith(invoice_prefix.lower()):
                 self.tree.delete(row)
             else:
+                i += 1
+                # Set color tag
+                tag = "evenrow" if i % 2 == 0 else "oddrow"
+                self.tree.item(row, tags=tag)
+                # Format totals.;
                 invoice_total += float(values[4].replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
                 if values[5] != "Paid In Full":
                     balance_total += float(values[5].replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
