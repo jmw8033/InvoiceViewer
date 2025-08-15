@@ -2,10 +2,10 @@ from tkinter import ttk, messagebox, scrolledtext, font, simpledialog
 from tkcalendar import DateEntry
 from collections import defaultdict
 from datetime import datetime
-from PIL import Image, ImageTk
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 import os, pymssql, time, threading, re, queue, sys, json, gc
+import babel.numbers
 
 
 INVOICE_DIR = r"S:\Titan_DM\Titan_Filing\AP_Invoices"
@@ -48,7 +48,7 @@ class InvoiceViewer(tk.Tk):
 
 
     def create_loading_screen(self):
-        self.loading_bg = ImageTk.PhotoImage(Image.open("logo.png").resize((800, 700)))
+        self.loading_bg = tk.PhotoImage(file="logo.png")
         self.loading_canvas = tk.Canvas(self, bg="white", width=1220, height=700)
         self.loading_canvas.pack(expand=True, fill="both", side="top", anchor="w")
         self.loading_canvas.background = self.loading_bg
@@ -119,7 +119,7 @@ class InvoiceViewer(tk.Tk):
         self.help_popup = HelpPopup(self)
 
         # Ignore list image
-        self.ignore_photo = ImageTk.PhotoImage(Image.open("leaf.png").resize((13, 13)))
+        self.ignore_photo = tk.PhotoImage(file="leaf.png")
         self.ignore_label = tk.Label(self.filter_frame, image=self.ignore_photo)
         self.bind("<Control-F9>", self.add_ignore)
         self.bind("<Control-F10>", self.toggle_ignore_list)
