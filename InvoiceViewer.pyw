@@ -20,7 +20,7 @@ class InvoiceViewer(tk.Tk):
         self.style.theme_use("clam")
         self.tk.call("tk", "scaling", 1.33)
         self.gui_queue = queue.Queue()
-        self.geometry("1220x700")
+        self.geometry("1400x700")
 
         self.invoices = {} # List of dictionaries, {"VendorID", "InvoiceNum", "InvoiceDate", "ExtAmount", "Filepath"}
         self.company_ids = set() # Set of company IDs for quick lookup
@@ -29,7 +29,9 @@ class InvoiceViewer(tk.Tk):
         self.broken_companies = []
         self.broken_invoices = []
         self.by_vendor_invoice = []
-        self.checks_by_invoice = []
+        self.checks_by_vendor_invoice = defaultdict(list)
+        self.accounts_by_vendor_invoice = defaultdict(list)
+        self.account_description_by_account = {}
         self.missing_invoices = []
 
         # Ignore list for private vendors
@@ -71,7 +73,7 @@ class InvoiceViewer(tk.Tk):
                 tk.Label(self.loading_canvas, text=msg, font=("TKDefaultFont", 16), fg=color, bg="white").pack(side="top", anchor="w")
         except queue.Empty:
             pass
-        self.after(50, self.loading_loop)
+        self.loading_loop_id = self.after(50, self.loading_loop)
 
 
     def load_data(self):
@@ -172,18 +174,45 @@ class InvoiceViewer(tk.Tk):
                     JOIN Check_Detail CD ON CH.CheckID = CD.CheckID
                 """)
                 data=cur.fetchall()
-            self.checks_by_vendor_invoice = defaultdict(list)
             for row in data:
                 self.checks_by_vendor_invoice[(row["VendorID"], row["InvoiceNum"])].append((row["CheckNum"], row["CheckDate"], row["Amount"]))
             conn.close()
             t1 = time.perf_counter()
             self.loading_update(f"Check data loaded in {t1 - t0:.2f} seconds.")
             conn.close()
+
+        def load_accounts():
+            t0 = time.perf_counter()
+            # Connect to the database and fetch check data
+            conn = pymssql.connect(
+                server="ACAPP1",
+                user="titan",
+                password="titan",
+                database="titan",
+            )
+
+            with conn.cursor(as_dict=True) as cur:
+                cur.execute("""
+                    SELECT APH.VendorID, APH.InvoiceNum, APD.Account, APD.ExtAmount, GL.AccountDescription
+                    FROM AP_Header APH
+                    JOIN AP_Detail APD ON APH.RecordNum = APD.RecordNum
+                    JOIN GL_Accounts GL ON APD.Account = GL.AccountNumber
+                """)
+                data=cur.fetchall()
+            for row in data:
+                self.accounts_by_vendor_invoice[(row["VendorID"], row["InvoiceNum"])].append((row["Account"], row["ExtAmount"]))
+                self.account_description_by_account[row["Account"]] = row["AccountDescription"]
+
+            conn.close()
+            t1 = time.perf_counter()
+            self.loading_update(f"Check data loaded in {t1 - t0:.2f} seconds.")
+            conn.close()
         
         
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             _ = pool.submit(load_header)
             _ = pool.submit(load_checks)
+            _ = pool.submit(load_accounts)
         t1 = time.perf_counter()
         self.loading_update(f"Database loaded in {t1 - self.t0:.2f} seconds.")
 
@@ -213,20 +242,32 @@ class InvoiceViewer(tk.Tk):
         self.filter_frame.grid(row=0, column=0, sticky="ew")
         self.filter_frame.grid_propagate(False)
 
+        # Row 0
+
         # Company Search bar
         ttk.Label(self.filter_frame, text="Company ID:").grid(row=0, column=0, padx=5)
         self.company_entry = AutoCompleteEntry(self)
         self.company_entry.grid(row=0, column=1, padx=5, pady=5)
 
-        # Date ranges
-        ttk.Label(self.filter_frame, text="Start date:").grid(row=0, column=2, padx=5)
-        ttk.Label(self.filter_frame, text="End date:").grid(row=0, column=4, padx=5)
+        # Account Search bar
+        ttk.Label(self.filter_frame, text="Account:").grid(row=0, column=2, padx=5)
+        self.account_entry = tk.Entry(self.filter_frame)
+        self.account_entry.grid(row=0, column=3, padx=5)
+        self.account_text = tk.StringVar()
+        self.account_entry["textvariable"] = self.account_text
+        self.prev_account_text = ""
+        # When account text changes, rebuild using the new account filter
+        self.account_text.trace_add("write", lambda *_: self.company_entry.on_select(source="account"))
 
+        # Date ranges
+        ttk.Label(self.filter_frame, text="Start date:").grid(row=0, column=4, padx=5)
+        ttk.Label(self.filter_frame, text="End date:").grid(row=0, column=6, padx=5)
+        
         self.start_entry = DateEntry(self.filter_frame, width=10, date_pattern="mm/dd/yyyy")
         self.end_entry = DateEntry(self.filter_frame, width=10, date_pattern="mm/dd/yyyy")
         self.start_entry.set_date("01/01/2014")
-        self.start_entry.grid(row=0, column=3, padx=5)
-        self.end_entry.grid(row=0, column=5, padx=5)
+        self.start_entry.grid(row=0, column=5, padx=5)
+        self.end_entry.grid(row=0, column=7, padx=5)
         self.start_entry.bind("<<DateEntrySelected>>", self.company_entry.on_select)
         self.start_entry.bind("<Return>", self.company_entry.on_select)
         self.end_entry.bind("<Return>", self.company_entry.on_select)
@@ -235,24 +276,26 @@ class InvoiceViewer(tk.Tk):
         # PDF Only Checkbox
         self.pdf_only = tk.BooleanVar()
         self.pdf_cb = ttk.Checkbutton(self.filter_frame, text="File Available Only", variable=self.pdf_only, command=self.company_entry.on_select, takefocus=False)
-        self.pdf_cb.grid(row=0, column=6, padx=5)
+        self.pdf_cb.grid(row=0, column=8, padx=5)
 
         # All companies checkbox
         self.all_companies = tk.BooleanVar()
         self.all_companies_cb = ttk.Checkbutton(self.filter_frame, text="Search All Companies", variable=self.all_companies, command=self.company_entry.toggle_all_companies, takefocus=False)
-        self.all_companies_cb.grid(row=0, column=7, padx=5)
+        self.all_companies_cb.grid(row=0, column=9, padx=5)
 
         # Refresh button
         self.refresh_button = tk.Button(self.filter_frame, text="⭮", command=self.restart)
-        self.refresh_button.place(x=1111, y=5)
+        self.refresh_button.place(x=1291, y=5)
 
         # Help button
         self.help_button = tk.Button(self.filter_frame, text="Help", command=lambda *_: self.help_popup.toggle())
-        self.help_button.place(x=1136, y=5)
+        self.help_button.place(x=1316, y=5)
         
         # Errors button
         self.errors_button = tk.Button(self.filter_frame, text="Errors", command=lambda *_: self.error_popup.toggle())
-        self.errors_button.place(x=1175, y=5)
+        self.errors_button.place(x=1355, y=5)
+
+        # Row 1
 
         # Invoice search
         ttk.Label(self.filter_frame, text="Invoice:").grid(row=1, column=0, padx=5)
@@ -271,12 +314,18 @@ class InvoiceViewer(tk.Tk):
         self.invoice_total = tk.StringVar()
         self.invoice_total.set("Total: $0")
         self.invoice_total_label = ttk.Label(self.filter_frame, textvariable=self.invoice_total)
-        self.invoice_total_label.place(x=600, y=40)
+        self.invoice_total_label.place(x=800, y=40)
 
         self.balance_total = tk.StringVar()
         self.balance_total.set("Total: $0")
         self.balance_total_label = ttk.Label(self.filter_frame, textvariable=self.balance_total)
-        self.balance_total_label.place(x=725, y=40)
+        self.balance_total_label.place(x=925, y=40)
+
+        # Account sum
+        self.account_sum = tk.StringVar()
+        self.account_sum.set("Account Sum: $0")
+        self.account_sum_label = ttk.Label(self.filter_frame, textvariable=self.account_sum)
+        self.account_sum_label.place(x=310, y=40)
 
 
     def create_treeview(self):
@@ -284,11 +333,12 @@ class InvoiceViewer(tk.Tk):
         self.tree_frame.grid(row=1, column=0, sticky="nsew")
 
         # Column setup
-        self.tree = ttk.Treeview(self.tree_frame, columns=("Vendor", "Company Name", "Invoice", "Date", "Invoice Amount", "Balance", 
+        self.tree = ttk.Treeview(self.tree_frame, columns=("Vendor", "Company Name", "GL Account", "Invoice", "Date", "Invoice Amount", "Balance", 
                                                            "Check Number", "Check Date", "File Available", "Filepath"), show='tree headings')
         self.tree.column("#0", width=0, stretch=False)
         self.tree.column("Vendor", width=50, anchor="center")
         self.tree.column("Company Name", width=110, anchor="center")
+        self.tree.column("GL Account", width=140, anchor="center")
         self.tree.column("Invoice", width=110, anchor="center")
         self.tree.column("Date", width=40, anchor="center")
         self.tree.column("Invoice Amount", width=50, anchor="center")
@@ -300,6 +350,7 @@ class InvoiceViewer(tk.Tk):
 
         self.tree.heading("Vendor", text="Vendor", command=lambda: self.sort_by("Vendor"))
         self.tree.heading("Company Name", text="Company Name", command=lambda: self.sort_by("Company Name"))
+        self.tree.heading("GL Account", text="GL Account", command=lambda: self.sort_by("GL Account"))
         self.tree.heading("Invoice", text="Invoice", command=lambda: self.sort_by("Invoice"))
         self.tree.heading("Date", text="Date  ▼", command=lambda: self.sort_by("Date"))
         self.tree.heading("Invoice Amount", text="Invoice Amount", command=lambda: self.sort_by("Invoice Amount"))
@@ -322,18 +373,27 @@ class InvoiceViewer(tk.Tk):
         self.tree.tag_configure("checkrow", background="#fdfaf1")
         
     
-    def show_invoices(self, company, invoice_prefix):
+    def show_invoices(self, company, invoice_prefix, account_filter): 
         invoice_count = 0
         invoice_total = 0
         balance_total = 0
         values = []
 
         for entry in self.invoices:
-            vendor = entry["VendorID"]
+            vendor = str(entry["VendorID"])
             if (self.all_companies.get() and not vendor.lower().startswith(company.lower())) or (self.ignoring and vendor in self.ignore_list):
                 continue
             if not self.all_companies.get() and vendor.lower() != company.lower():
                 continue
+            if account_filter:
+                gl_accounts = self.accounts_by_vendor_invoice[(vendor, str(entry["InvoiceNum"]))].copy()
+                matched = False
+                for account, amount in gl_accounts:
+                    if account and self.account_match_filter(account_filter, account):
+                        matched = True
+                        break
+                if not matched:
+                    continue
 
             # Check if invoice date is between start and end dates
             date = entry["InvoiceDate"].date()
@@ -346,7 +406,7 @@ class InvoiceViewer(tk.Tk):
             if self.pdf_only.get() == 1 and not has_filepath:
                 continue
 
-            invoice = entry["InvoiceNum"]
+            invoice =  str(entry["InvoiceNum"])
             if not invoice.lower().startswith(invoice_prefix.lower()):
                 continue
             company_name = entry["CompanyName"]
@@ -371,7 +431,15 @@ class InvoiceViewer(tk.Tk):
             invoice_total += amount
             amount = f"${amount:,.2f}" if amount >= 0 else f"(${abs(amount):,.2f})"
 
-            values.append((vendor, company_name, invoice, date, amount, balance, check_number, check_date, has_filepath, filepath))
+            # get GL Account, just like checks
+            gl_account = self.accounts_by_vendor_invoice[(vendor, invoice)].copy()                    
+            if len(gl_account) == 1:
+                gl_account = gl_account[0]
+                gl_account = f"{gl_account[0]} - {self.account_description_by_account.get(gl_account[0], '')}"
+            else:
+                gl_account = ""
+
+            values.append((vendor, company_name, gl_account, invoice, date, amount, balance, check_number, check_date, has_filepath, filepath))
             invoice_count += 1
 
         invoice_total =  f"${invoice_total:,.2f}" if invoice_total >= 0 else f"(${abs(invoice_total):,.2f})"
@@ -382,32 +450,72 @@ class InvoiceViewer(tk.Tk):
         return invoice_count, values
 
 
-    def filter_rows(self, company, invoice_prefix): # Filter current rows based on company name and invoice
+    def filter_rows(self, company, invoice_prefix, account_filter): # Filter current rows based on company name, invoice, and gl account
         invoice_total = 0
         balance_total = 0
         i = 1
+
         for row in self.tree.get_children():
             values = self.tree.item(row, "values")
-            if not values[0].lower().startswith(company.lower()) or not values[2].lower().startswith(invoice_prefix.lower()):
+            # Check company and invoice prefix
+            if not values[0].lower().startswith(company.lower()) or not values[3].lower().startswith(invoice_prefix.lower()):
                 self.tree.delete(row)
-            else:
-                i += 1
-                # Set color tag
-                tag = "evenrow" if i % 2 == 0 else "oddrow"
-                self.tree.item(row, tags=tag)
-                # Format totals.;
-                invoice_total += float(values[4].replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
-                if values[5] != "Paid In Full":
-                    balance_total += float(values[5].replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
+            elif values[2] in ("▼", "▲"): # Has subrows, need to check each subrow for account filter
+                subrows = self.tree.get_children(row)
+                remove_row = True
+                for subrow in subrows:
+                    subvalues = self.tree.item(subrow, "values")
+                    if self.account_match_filter(account_filter, subvalues[2]):
+                        remove_row = False
+                    else:
+                        self.tree.delete(subrow)
+                if remove_row:
+                    self.tree.delete(row)
+            elif not self.account_match_filter(account_filter, values[2]): # No subrows, just check account filter
+                self.tree.delete(row)
+
+        # Recalculate totals and set row colors
+        for row in self.tree.get_children():
+            i += 1
+            # Set color tag
+            tag = "evenrow" if i % 2 == 0 else "oddrow"
+            self.tree.item(row, tags=tag)
+            # Format totals.;
+            invoice_total += float(values[5].replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
+            if values[6] != "Paid In Full":
+                balance_total += float(values[6].replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
+
         invoice_total = f"${invoice_total:,.2f}" if invoice_total >= 0 else f"(${abs(invoice_total):,.2f})"
         balance_total = f"${balance_total:,.2f}" if balance_total >= 0 else f"(${abs(balance_total):,.2f})"
         self.invoice_total.set(f"Total: {invoice_total}")
         self.balance_total.set(f"Total: {balance_total}")
+
+        self.update_account_sum()
         
         return len(self.tree.get_children())
+    
+
+    def update_account_sum(self):
+        total = 0
+        for row in self.tree.get_children():
+            subrows = self.tree.get_children(row)
+            children = [c for c in subrows if self.tree.set(c, "GL Account")]
+            if children:
+                for c in children:
+                    subvals = self.tree.item(c, "values")
+                    amt = subvals[3] # GL Account Amount
+                    total += float(amt.replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
+            else:
+                # Get main row amount from Invoice Amount
+                vals = self.tree.item(row, "values")
+                amt = vals[5]
+                total += float(amt.replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
+        total = f"${total:,.2f}" if total >= 0 else f"(${abs(total):,.2f})"
+        self.account_sum.set(f"Account Sum: {total}")
 
 
     def sort_by(self, col, values=None, header_pressed=True):
+        account_filter = self.account_text.get()
         if header_pressed:
             if col == self.sort_col:
                 self.sort_desc = not self.sort_desc
@@ -428,38 +536,75 @@ class InvoiceViewer(tk.Tk):
         keymap = {
             "Vendor": lambda x: x[0],
             "Company Name": lambda x: x[1],
-            "Invoice": lambda x: invoice_key(str(x[2])),
-            "Date": lambda x: x[3],
-            "Invoice Amount": lambda x: float(x[4].replace("$", "").replace("(", "-").replace(",", "").replace(")", "")),
-            "Balance": lambda x: float(x[5].replace("$", "").replace("(", "-").replace(",", "").replace(")", "")) if x[5] != "Paid In Full" else 0,
-            "Check Number": lambda x: x[6],
-            "Check Date": lambda x: datetime.strptime(x[7], "%m-%d-%Y")  if x[7] else datetime(2000, 1, 1),
-            "File Available": lambda x: x[8]
+            "GL Account": lambda x: x[2],
+            "Invoice": lambda x: invoice_key(str(x[3])),
+            "Date": lambda x: x[4],
+            "Invoice Amount": lambda x: float(x[5].replace("$", "").replace("(", "-").replace(",", "").replace(")", "")),
+            "Balance": lambda x: float(x[6].replace("$", "").replace("(", "-").replace(",", "").replace(")", "")) if x[6] != "Paid In Full" else 0,
+            "Check Number": lambda x: x[7],
+            "Check Date": lambda x: datetime.strptime(x[8], "%m-%d-%Y")  if x[8] else datetime(2000, 1, 1),
+            "File Available": lambda x: x[9]
         }
         reverse = self.sort_desc
         if col == "Vendor" or col == "Invoice" or col == "Company Name":
             reverse = not reverse
 
         values.sort(key=keymap[col], reverse=reverse)
-
         for i, row in enumerate(values):
             tag = "evenrow" if i % 2 == 0 else "oddrow"
             iid = self.tree.insert("", "end", values=row, tags=tag)
 
-            # Add subrows for checks
-            checks = self.checks_by_vendor_invoice[(row[0], row[2])]
+            # Add subrows GL Accounts
+            gl_accounts = self.accounts_by_vendor_invoice[(row[0], row[3])].copy()
+            if len(gl_accounts) > 1:
+                gl_accounts_copy = gl_accounts.copy()
+                for account, amount in gl_accounts_copy:
+                    if account is None:
+                        gl_accounts.remove((account, amount))
+                    if not self.account_match_filter(account_filter, account):
+                        gl_accounts.remove((account, amount))
+                    
+                if len(gl_accounts) == 0:
+                    self.tree.delete(iid)
+                    continue
+                else:
+                    self.tree.set(iid, "GL Account", "▼")
+                    for i in range(len(gl_accounts)):
+                        acct, amt = gl_accounts[i]
+                        if amt is None:
+                            amt = 0
+                        else:
+                            amt = f"${amt:,.2f}" if amt >= 0 else f"(${abs(amt):,.2f})"
+                        acct = f"{acct} - {self.account_description_by_account.get(acct, '')}"
+                        self.tree.insert(iid, "end", values=("", "", acct, amt, "", "", "", "", "", "", ""), tags="checkrow")
+
+            # Add subrows Checks
+            checks = self.checks_by_vendor_invoice[(row[0], row[3])]
             if len(checks) > 1:
                 for cnum, cdate, camt in checks:
                     self.tree.set(iid, "Check Number", "▼")
                     cdate = cdate.strftime("%m-%d-%Y")
                     camt = f"${camt:,.2f}" if camt >= 0 else f"(${abs(camt):,.2f})"
-                    self.tree.insert(iid, "end", values=("", "", "", "", "", camt, cnum, cdate, "", ""), tags="checkrow")
+                    self.tree.insert(iid, "end", values=("", "", "", "", "", "", camt, cnum, cdate, "", ""), tags="checkrow")
 
         arrow = "  ▼" if self.sort_desc else "  ▲"
         for c in self.tree["columns"]:
             text = c + arrow if c == col else c
             self.tree.heading(c, text=text)
+        
+        self.update_account_sum()
         return "break"
+
+
+    def account_match_filter(self, account_filter, account):
+        filter = account_filter.lower()
+        account = "" if account is None else str(account).strip().lower()
+        description = self.account_description_by_account.get(account, "").lower()
+
+        if filter.isdigit():
+            return account.startswith(filter)
+        else:
+            return filter in account or filter in description
 
     
     def restart(self):
@@ -478,7 +623,8 @@ class InvoiceViewer(tk.Tk):
         self.broken_companies.clear()
         self.broken_invoices.clear()
         self.by_vendor_invoice.clear()
-        self.checks_by_invoice.clear()
+        self.checks_by_vendor_invoice.clear()
+        self.accounts_by_vendor_invoice.clear()
         self.missing_invoices.clear()
 
         gc.collect()
@@ -547,13 +693,12 @@ class AutoCompleteEntry(tk.Entry):
 
         if self.listbox is None:
             self.listbox = ttk.Treeview(self.root, columns=("id", "name"), show="tree", height=8)
-            self.listbox.column("#0", width=0, stretch=False)
-            self.listbox.column("id", width=80)
-            self.listbox.column("name", width=300)
+            self.listbox.heading("id", text="ID")
+            self.listbox.heading("name", text="Name")
             self.listbox.bind("<ButtonRelease-1>", self.on_select)
             self.listbox.bind("<Return>", self.on_select)
-            self.listbox.bind("<Up>", lambda: self.listbox_move("up"))
-            self.listbox.bind("<Down>", lambda: self.listbox_move("down"))
+            self.listbox.bind("<Up>", lambda e: self.listbox_move("up"))
+            self.listbox.bind("<Down>", lambda e: self.listbox_move("down"))
 
         self.listbox.delete(*self.listbox.get_children())
         matches.sort()  # Sort matches alphabetically
@@ -589,22 +734,25 @@ class AutoCompleteEntry(tk.Entry):
             self.tree.delete(*self.tree.get_children())
             return
         invoice_prefix = self.root.invoice_text.get()
+        account_filter = self.root.account_text.get()
 
         # If user adds text, just need to filter not re add all rows
         narrow = False
         if ((source == "company" and company.startswith(self.prev_company) and not company == self.prev_company) or
-            (source == "invoice" and invoice_prefix.startswith(self.root.prev_invoice_text) and not invoice_prefix == self.root.prev_invoice_text)):
+            (source == "invoice" and invoice_prefix.startswith(self.root.prev_invoice_text) and not invoice_prefix == self.root.prev_invoice_text) or
+            (source == "account" and account_filter.startswith(self.root.prev_account_text) and not account_filter == self.root.prev_account_text)):
                 narrow = True
         self.prev_company = company
         self.root.prev_invoice_text = invoice_prefix
+        self.root.prev_account_text = account_filter
         
         if narrow:
             # Filter current rows
-            invoice_count = self.root.filter_rows(company, invoice_prefix)
+            invoice_count = self.root.filter_rows(company, invoice_prefix, account_filter)
         else:
             self.tree.delete(*self.tree.get_children())
             # Update treeview with invoices for selected company
-            invoice_count, values = self.root.show_invoices(company, invoice_prefix)
+            invoice_count, values = self.root.show_invoices(company, invoice_prefix, account_filter)
             # Resort
             self.root.sort_by(self.root.sort_col, values, False)
         
@@ -646,20 +794,56 @@ class AutoCompleteEntry(tk.Entry):
         
         col_num = self.tree.identify_column(event.x)
         col = self.tree.heading(col_num)["text"]
-        if col != "Check Number" and col != "Check Number  ▲" and col != "Check Number  ▼":
-            self.open_file(event)
-        else:
+
+        if col == "GL Account" or col == "GL Account  ▲" or col == "GL Account  ▼":
+            self.toggle_gl_accounts(row)
+            return "break"
+        elif col == "Check Number" or col == "Check Number  ▲" or col == "Check Number  ▼":
             self.toggle_checks(row)
             return "break"
+        else:
+            self.open_file(event)
 
 
     def toggle_checks(self, row):
-        if self.tree.get_children(row):
+        subrows = self.tree.get_children(row)
+        has_check = False
+        for subrow in subrows:
+            if self.tree.set(subrow, "Check Number"):
+                has_check = True
+                break
+
+        if has_check:
             is_open = self.tree.item(row, "open")
             if is_open:
                 self.tree.set(row, "Check Number", "▼")
+                if self.tree.set(row, "GL Account") in ("▲", "▼"):
+                    self.tree.set(row, "GL Account", "▼")
             else:
                 self.tree.set(row, "Check Number", "▲")
+                if self.tree.set(row, "GL Account") in ("▲", "▼"):
+                    self.tree.set(row, "GL Account", "▲")
+            self.tree.item(row, open=not is_open)
+
+
+    def toggle_gl_accounts(self, row):
+        subrows = self.tree.get_children(row)
+        has_gl_account = False
+        for subrow in subrows:
+            if self.tree.set(subrow, "GL Account"):
+                has_gl_account = True
+                break
+
+        if has_gl_account:
+            is_open = self.tree.item(row, "open")
+            if is_open:
+                self.tree.set(row, "GL Account", "▼")
+                if self.tree.set(row, "Check Number") in ("▲", "▼"):
+                    self.tree.set(row, "Check Number", "▼")
+            else:
+                self.tree.set(row, "GL Account", "▲")
+                if self.tree.set(row, "Check Number") in ("▲", "▼"):
+                    self.tree.set(row, "Check Number", "▲")
             self.tree.item(row, open=not is_open)
     
 
