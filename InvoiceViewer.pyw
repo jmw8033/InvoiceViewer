@@ -91,7 +91,7 @@ class InvoiceViewer(tk.Tk):
         for row in self.invoices:
             try:
                 row["Filepath"] = file_index.pop((row["VendorID"], row["InvoiceNum"]))
-            except KeyError:
+            except:
                 self.missing_invoices.append((row["VendorID"], row["InvoiceNum"], row["InvoiceDate"].strftime("%m-%d-%Y")))
         t1 = time.perf_counter()
         self.loading_update(f"Invoice files loaded in {t1 - t0:.2f} seconds.")
@@ -108,7 +108,6 @@ class InvoiceViewer(tk.Tk):
 
     
     def load_gui(self):
-        self.after_cancel(self.loading_loop_id)
         # Destroy loading screen
         self.loading_canvas.destroy()
 
@@ -184,7 +183,7 @@ class InvoiceViewer(tk.Tk):
 
         def load_accounts():
             t0 = time.perf_counter()
-            # Connect to the database and fetch account data
+            # Connect to the database and fetch check data
             conn = pymssql.connect(
                 server="ACAPP1",
                 user="titan",
@@ -206,7 +205,8 @@ class InvoiceViewer(tk.Tk):
 
             conn.close()
             t1 = time.perf_counter()
-            self.loading_update(f"Account data loaded in {t1 - t0:.2f} seconds.")
+            self.loading_update(f"Check data loaded in {t1 - t0:.2f} seconds.")
+            conn.close()
         
         
         with ThreadPoolExecutor(max_workers=3) as pool:
@@ -327,6 +327,12 @@ class InvoiceViewer(tk.Tk):
         self.account_sum_label = ttk.Label(self.filter_frame, textvariable=self.account_sum)
         self.account_sum_label.place(x=340, y=40)
 
+        # Selected rows sum
+        self.selected_sum = tk.StringVar()
+        self.selected_sum.set("Selected: $0.00")
+        self.selected_sum_label = ttk.Label(self.filter_frame, textvariable=self.selected_sum)
+        self.selected_sum_label.place(x=620, y=40)
+
 
     def create_treeview(self):
         self.tree_frame = ttk.Frame(self, height=600)
@@ -365,6 +371,7 @@ class InvoiceViewer(tk.Tk):
         scrollbar = ttk.Scrollbar(self.tree_frame, command=self.tree.yview)
         scrollbar.pack(side="right", fill="y")
         self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.bind("<<TreeviewSelect>>", self.update_selected_sum)
 
         # Styles
         self.style.configure("Treeview", rowheight=20) 
@@ -373,6 +380,17 @@ class InvoiceViewer(tk.Tk):
         self.tree.tag_configure("checkrow", background="#fdfaf1")
         
     
+    def update_selected_sum(self, *_):
+        total = 0
+        for item in self.tree.selection():
+            vals = self.tree.item(item, "values")
+            amt_str = vals[5]  # Invoice Amount column — empty on subrows
+            if amt_str:
+                total += float(amt_str.replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
+        total_str = f"${total:,.2f}" if total >= 0 else f"(${abs(total):,.2f})"
+        self.selected_sum.set(f"Selected: {total_str}")
+
+
     def show_invoices(self, company, invoice_prefix, account_filter): 
         invoice_count = 0
         invoice_total = 0
@@ -476,7 +494,6 @@ class InvoiceViewer(tk.Tk):
 
         # Recalculate totals and set row colors
         for row in self.tree.get_children():
-            values = self.tree.item(row, "values")
             i += 1
             # Set color tag
             tag = "evenrow" if i % 2 == 0 else "oddrow"
@@ -562,7 +579,7 @@ class InvoiceViewer(tk.Tk):
                 for account, amount in gl_accounts_copy:
                     if account is None:
                         gl_accounts.remove((account, amount))
-                    elif not self.account_match_filter(account_filter, account):
+                    if not self.account_match_filter(account_filter, account):
                         gl_accounts.remove((account, amount))
                     
                 if len(gl_accounts) == 0:
@@ -599,9 +616,8 @@ class InvoiceViewer(tk.Tk):
 
     def account_match_filter(self, account_filter, account):
         filter = account_filter.lower()
-        account = "" if account is None else account
+        account = "" if account is None else str(account).strip().lower()
         description = self.account_description_by_account.get(account, "").lower()
-        account = account.lower()
 
         if filter.isdigit():
             return account.startswith(filter)
@@ -628,7 +644,6 @@ class InvoiceViewer(tk.Tk):
         self.checks_by_vendor_invoice.clear()
         self.accounts_by_vendor_invoice.clear()
         self.missing_invoices.clear()
-        self.account_description_by_account.clear()
 
         gc.collect()
 
@@ -648,7 +663,7 @@ class InvoiceViewer(tk.Tk):
 
 
     def add_ignore(self, event):
-        vendors = ", ".join([("\n" if i % 7 == 0 else "") + s for i, s in enumerate(self.ignore_list)])
+        vendors = ", ".join([("\n" * ((i) % 7 == 0)) + s for i, s in enumerate(self.ignore_list)])
         new_item = simpledialog.askstring("Hidden Vendors", "Current Hidden Vendors:\n" + vendors + "\n\nEnter new Vendor ID (case doesn't matter)", parent=self)
         if new_item:
             self.ignore_list.add(new_item.upper())
@@ -727,7 +742,7 @@ class AutoCompleteEntry(tk.Entry):
                         self.company.set(self.listbox.item(items[0], "values")[0])
 
             company = self.company.get()
-            if not any(company == tup[0] for tup in self.company_ids):   
+            if not any(company in tup for tup in self.company_ids):   
                 self.tree.delete(*self.tree.get_children())
                 return
         else:
@@ -980,6 +995,7 @@ class HelpPopup(tk.Toplevel):
 - Double left-click a row to open the invoice file if it is available
 - Left-click a column header to sort by that column, click again to swap direction
 - Left-click the ▼ in the Check Number column to display all associated checks
+- Hold Ctrl and left-click to select multiple individual rows, or hold Shift to select a range
 
 All questions and suggestions can be directed to jmwesthoff@atlanticconcrete.com"""
         self.text.insert(tk.END, about_text)
