@@ -211,9 +211,9 @@ class InvoiceViewer(tk.Tk):
         
         
         with ThreadPoolExecutor(max_workers=3) as pool:
-            pool.submit(load_header).result()
-            _ = pool.submit(load_checks)
-            _ = pool.submit(load_accounts)
+            _ = pool.submit(load_header).result()
+            _ = pool.submit(load_checks).result()
+            _ = pool.submit(load_accounts).result()
         t1 = time.perf_counter()
         self.loading_update(f"Database loaded in {t1 - self.t0:.2f} seconds.")
 
