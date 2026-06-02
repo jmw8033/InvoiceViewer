@@ -710,7 +710,7 @@ class InvoiceViewer(tk.Tk):
         if self.ignoring:
             self.ignore_label.place_forget()
         else:
-            self.ignore_label.place(x=1113, y=9)
+            self.ignore_label.grid(row=0, column=11, sticky="w", padx=12)
         self.company_entry.on_select()
         return "break"
 
