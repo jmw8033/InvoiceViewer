@@ -680,7 +680,7 @@ class InvoiceViewer(tk.Tk):
         with open("ignore.json", "w") as f:
             json.dump(list(self.ignore_list), f)
         
-        for w in (self.filter_frame, self.tree_frame, self.error_popup, self.help_popup):
+        for w in self.winfo_children():
             w.destroy()
         
         self.after_cancel(self.loading_loop_id)
@@ -694,6 +694,9 @@ class InvoiceViewer(tk.Tk):
         self.checks_by_vendor_invoice.clear()
         self.accounts_by_vendor_invoice.clear()
         self.missing_invoices.clear()
+
+        self.columnconfigure(0, weight=0)
+        self.rowconfigure(0, weight=0)
 
         gc.collect()
 
