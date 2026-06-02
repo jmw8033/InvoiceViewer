@@ -211,7 +211,7 @@ class InvoiceViewer(tk.Tk):
         
         
         with ThreadPoolExecutor(max_workers=3) as pool:
-            _ = pool.submit(load_header)
+            pool.submit(load_header).result()
             _ = pool.submit(load_checks)
             _ = pool.submit(load_accounts)
         t1 = time.perf_counter()
