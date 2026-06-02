@@ -117,6 +117,7 @@ class InvoiceViewer(tk.Tk):
 
         self.create_treeview()
         self.create_filter_frame()
+        self.create_summary_bar()
         self.error_popup = ErrorPopup(self, self.broken_companies, self.broken_invoices, self.missing_invoices)
         self.help_popup = HelpPopup(self)
 
@@ -140,7 +141,7 @@ class InvoiceViewer(tk.Tk):
 
             with conn.cursor(as_dict=True) as cur:
                 cur.execute("""
-                    SELECT APH.VendorID, APH.InvoiceNum, APH.InvoiceDate, APH.Subtotal, APH.Payments, V.CompanyName
+                    SELECT APH.VendorID, APH.InvoiceNum, APH.InvoiceDate, APH.Subtotal, APH.Payments, APH.PlantID, V.CompanyName
                     FROM AP_Header APH
                     JOIN Vendors V ON APH.VendorID = V.VendorId
                 """)
@@ -261,39 +262,43 @@ class InvoiceViewer(tk.Tk):
 
         # Date ranges
         ttk.Label(self.filter_frame, text="Start date:").grid(row=0, column=4, padx=5)
-        ttk.Label(self.filter_frame, text="End date:").grid(row=0, column=6, padx=5)
-        
         self.start_entry = DateEntry(self.filter_frame, width=10, date_pattern="mm/dd/yyyy")
-        self.end_entry = DateEntry(self.filter_frame, width=10, date_pattern="mm/dd/yyyy")
         self.start_entry.set_date("01/01/2014")
         self.start_entry.grid(row=0, column=5, padx=5)
-        self.end_entry.grid(row=0, column=7, padx=5)
         self.start_entry.bind("<<DateEntrySelected>>", self.company_entry.on_select)
         self.start_entry.bind("<Return>", self.company_entry.on_select)
+
+        ttk.Label(self.filter_frame, text="End date:").grid(row=0, column=6, padx=5)
+        self.end_entry = DateEntry(self.filter_frame, width=10, date_pattern="mm/dd/yyyy")
+        self.end_entry.grid(row=0, column=7, padx=5)
         self.end_entry.bind("<Return>", self.company_entry.on_select)
         self.end_entry.bind("<<DateEntrySelected>>", self.company_entry.on_select)
-
-        # PDF Only Checkbox
-        self.pdf_only = tk.BooleanVar()
-        self.pdf_cb = ttk.Checkbutton(self.filter_frame, text="File Available Only", variable=self.pdf_only, command=self.company_entry.on_select, takefocus=False)
-        self.pdf_cb.grid(row=0, column=8, padx=5)
 
         # All companies checkbox
         self.all_companies = tk.BooleanVar()
         self.all_companies_cb = ttk.Checkbutton(self.filter_frame, text="Search All Companies", variable=self.all_companies, command=self.company_entry.toggle_all_companies, takefocus=False)
-        self.all_companies_cb.grid(row=0, column=9, padx=5)
+        self.all_companies_cb.grid(row=0, column=8, padx=5)
 
+        # PDF Only Checkbox
+        self.pdf_only = tk.BooleanVar()
+        self.pdf_cb = ttk.Checkbutton(self.filter_frame, text="File Available Only", variable=self.pdf_only, command=self.company_entry.on_select, takefocus=False)
+        self.pdf_cb.grid(row=0, column=9, padx=5)
+
+        # Far right frame for buttons
+        ttk.Label(self.filter_frame, text="                                                                                ").grid(row=0, column=10) # Spacer
+        self.right_button_frame = ttk.Frame(self.filter_frame)
+        self.right_button_frame.grid(row=0, column=11, padx=5, sticky="e")
         # Refresh button
-        self.refresh_button = tk.Button(self.filter_frame, text="⭮", command=self.restart)
-        self.refresh_button.place(x=1291, y=5)
+        self.refresh_button = tk.Button(self.right_button_frame, text="⭮", command=self.restart)
+        self.refresh_button.pack(side="left", padx=5)
 
         # Help button
-        self.help_button = tk.Button(self.filter_frame, text="Help", command=lambda *_: self.help_popup.toggle())
-        self.help_button.place(x=1316, y=5)
-        
+        self.help_button = tk.Button(self.right_button_frame, text="Help", command=lambda *_: self.help_popup.toggle())
+        self.help_button.pack(side="left", padx=5)
+
         # Errors button
-        self.errors_button = tk.Button(self.filter_frame, text="Errors", command=lambda *_: self.error_popup.toggle())
-        self.errors_button.place(x=1355, y=5)
+        self.errors_button = tk.Button(self.right_button_frame, text="Errors", command=lambda *_: self.error_popup.toggle())
+        self.errors_button.pack(side="left", padx=5)
 
         # Row 1
 
@@ -306,32 +311,47 @@ class InvoiceViewer(tk.Tk):
         self.invoice_entry["textvariable"] = self.invoice_text
         self.invoice_text.trace_add("write", lambda *_: self.company_entry.on_select(source="invoice"))
 
-        # Amount found label
-        self.amount_label = ttk.Label(self.filter_frame, text="")
-        self.amount_label.grid(row=1, column=2, padx=5, columnspan=6, sticky="w")
+        # Plant Filter Dropdown
+        ttk.Label(self.filter_frame, text="Plant:").grid(row=1, column=2, padx=5)
+        self.plant_var = tk.StringVar(value="Both")
+        self.plant_cb = ttk.Combobox(self.filter_frame, textvariable=self.plant_var, values=["Both", "ACP", "APC"], width=6, state="readonly")
+        self.plant_cb.grid(row=1, column=3, padx=5, sticky="w")
+        self.plant_cb.bind("<<ComboboxSelected>>", self.company_entry.on_select)
 
-        # Invoice and Balance totals
-        self.invoice_total = tk.StringVar()
-        self.invoice_total.set("Total: $0")
-        self.invoice_total_label = ttk.Label(self.filter_frame, textvariable=self.invoice_total)
-        self.invoice_total_label.place(x=800, y=40)
+        # Date Filter Dropdown
+        ttk.Label(self.filter_frame, text="Date Filter:").grid(row=1, column=4, padx=5)
+        self.date_filter_var = tk.StringVar(value="Invoice Date")
+        self.date_filter_cb = ttk.Combobox(self.filter_frame, textvariable=self.date_filter_var, values=["Invoice Date", "Check Date"], width=12, state="readonly")
+        self.date_filter_cb.grid(row=1, column=5, padx=5)
+        self.date_filter_cb.bind("<<ComboboxSelected>>", self.company_entry.on_select)
 
-        self.balance_total = tk.StringVar()
-        self.balance_total.set("Total: $0")
-        self.balance_total_label = ttk.Label(self.filter_frame, textvariable=self.balance_total)
-        self.balance_total_label.place(x=925, y=40)
 
-        # Account sum
-        self.account_sum = tk.StringVar()
-        self.account_sum.set("Account Sum: $0")
-        self.account_sum_label = ttk.Label(self.filter_frame, textvariable=self.account_sum)
-        self.account_sum_label.place(x=340, y=40)
+    def create_summary_bar(self):
+        # Bottom level summary bar for totals and selected sum
+        self.summary_frame = ttk.Frame(self, relief="groove", borderwidth=1, padding=(6, 4))
+        self.summary_frame.grid(row=2, column=0, sticky="ew")
+        
+        for i in range(5):
+            self.summary_frame.columnconfigure(i, weight=1)
 
-        # Selected rows sum
-        self.selected_sum = tk.StringVar()
-        self.selected_sum.set("Selected: $0.00")
-        self.selected_sum_label = ttk.Label(self.filter_frame, textvariable=self.selected_sum)
-        self.selected_sum_label.place(x=620, y=40)
+        self.amount_label = ttk.Label(self.summary_frame, text="0 invoices found.", font=("TKDefaultFont", 10, "bold"))
+        self.amount_label.grid(row=0, column=0, sticky="w", padx=10)
+
+        self.account_sum = tk.StringVar(value="Account Total: $0")
+        self.account_sum_label = ttk.Label(self.summary_frame, textvariable=self.account_sum, font=("TKDefaultFont", 10))
+        self.account_sum_label.grid(row=0, column=1, sticky="w")
+
+        self.selected_sum = tk.StringVar(value="Selected Total: $0.00")
+        self.selected_sum_label = ttk.Label(self.summary_frame, textvariable=self.selected_sum, font=("TKDefaultFont", 10))
+        self.selected_sum_label.grid(row=0, column=2, sticky="w")
+
+        self.invoice_total = tk.StringVar(value="Invoice Total: $0")
+        self.invoice_total_label = ttk.Label(self.summary_frame, textvariable=self.invoice_total, font=("TKDefaultFont", 10, "bold"))
+        self.invoice_total_label.grid(row=0, column=3, sticky="w")
+
+        self.balance_total = tk.StringVar(value="Balance Total: $0")
+        self.balance_total_label = ttk.Label(self.summary_frame, textvariable=self.balance_total, font=("TKDefaultFont", 10, "bold"))
+        self.balance_total_label.grid(row=0, column=4, sticky="w", padx=10)
 
 
     def create_treeview(self):
@@ -396,8 +416,18 @@ class InvoiceViewer(tk.Tk):
         invoice_total = 0
         balance_total = 0
         values = []
+        plant_filter = self.plant_var.get()
+        date_filter = self.date_filter_var.get()
 
         for entry in self.invoices:
+            # Check Plant ID, 110 for Concrete, 410 for Precast
+            plant_id = entry["PlantID"]
+            if plant_filter == "ACP" and plant_id != "110":
+                continue
+            if plant_filter == "APC" and plant_id != "410":
+                continue
+
+            # Check company, invoice prefix, and account filter
             vendor = str(entry["VendorID"])
             if (self.all_companies.get() and not vendor.lower().startswith(company.lower())) or (self.ignoring and vendor in self.ignore_list):
                 continue
@@ -414,9 +444,22 @@ class InvoiceViewer(tk.Tk):
                     continue
 
             # Check if invoice date is between start and end dates
+            invoice =  str(entry["InvoiceNum"])
             date = entry["InvoiceDate"].date()
-            if date < self.start_entry.get_date() or date > self.end_entry.get_date():
-                continue
+            if date_filter == "Invoice Date":
+                if date < self.start_entry.get_date() or date > self.end_entry.get_date():
+                    continue
+            elif date_filter == "Check Date":
+                checks = self.checks_by_vendor_invoice[(vendor, invoice)]
+                if not checks:
+                    continue
+                has_valid_check_date = False
+                for check_num, check_date, check_amount in checks:
+                    if check_date.date() >= self.start_entry.get_date() and check_date.date() <= self.end_entry.get_date():
+                        has_valid_check_date = True
+                        break
+                if not has_valid_check_date:
+                    continue 
 
             # Check if Has File Only is checked
             filepath = entry.get("Filepath", "")
@@ -424,7 +467,7 @@ class InvoiceViewer(tk.Tk):
             if self.pdf_only.get() == 1 and not has_filepath:
                 continue
 
-            invoice =  str(entry["InvoiceNum"])
+            # If we passed all the filters, add the invoice to the list
             if not invoice.lower().startswith(invoice_prefix.lower()):
                 continue
             company_name = entry["CompanyName"]
@@ -462,8 +505,8 @@ class InvoiceViewer(tk.Tk):
 
         invoice_total =  f"${invoice_total:,.2f}" if invoice_total >= 0 else f"(${abs(invoice_total):,.2f})"
         balance_total = f"${balance_total:,.2f}" if balance_total >= 0 else f"(${abs(balance_total):,.2f})"
-        self.invoice_total.set(f"Total: {invoice_total}")
-        self.balance_total.set(f"Total: {balance_total}")
+        self.invoice_total.set(f"Invoice Total: {invoice_total}")
+        self.balance_total.set(f"Balance Total: {balance_total}")
 
         return invoice_count, values
 
@@ -505,7 +548,7 @@ class InvoiceViewer(tk.Tk):
 
         invoice_total = f"${invoice_total:,.2f}" if invoice_total >= 0 else f"(${abs(invoice_total):,.2f})"
         balance_total = f"${balance_total:,.2f}" if balance_total >= 0 else f"(${abs(balance_total):,.2f})"
-        self.invoice_total.set(f"Total: {invoice_total}")
+        self.invoice_total.set(f"Invoice Total: {invoice_total}")
         self.balance_total.set(f"Total: {balance_total}")
 
         self.update_account_sum()
@@ -586,6 +629,8 @@ class InvoiceViewer(tk.Tk):
                     self.tree.delete(iid)
                     continue
                 else:
+                    # Sort GL accounts by account number
+                    gl_accounts.sort(key=lambda x: x[0])
                     self.tree.set(iid, "GL Account", "▼")
                     for i in range(len(gl_accounts)):
                         acct, amt = gl_accounts[i]
@@ -599,7 +644,12 @@ class InvoiceViewer(tk.Tk):
             # Add subrows Checks
             checks = self.checks_by_vendor_invoice[(row[0], row[3])]
             if len(checks) > 1:
+                # Sort checks by check date, newest first
+                checks.sort(key=lambda x: x[1], reverse=True)
                 for cnum, cdate, camt in checks:
+                    if self.date_filter_var.get() == "Check Date":
+                        if cdate.date() < self.start_entry.get_date() or cdate.date() > self.end_entry.get_date():
+                            continue
                     self.tree.set(iid, "Check Number", "▼")
                     cdate = cdate.strftime("%m-%d-%Y")
                     camt = f"${camt:,.2f}" if camt >= 0 else f"(${abs(camt):,.2f})"
