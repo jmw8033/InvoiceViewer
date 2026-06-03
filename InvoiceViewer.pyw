@@ -708,7 +708,7 @@ class InvoiceViewer(tk.Tk):
     def toggle_ignore_list(self, event):
         self.ignoring = not self.ignoring
         if self.ignoring:
-            self.ignore_label.place_forget()
+            self.ignore_label.grid_forget()
         else:
             self.ignore_label.grid(row=0, column=11, sticky="w", padx=12)
         self.company_entry.on_select()
