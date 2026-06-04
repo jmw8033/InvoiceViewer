@@ -115,6 +115,7 @@ class InvoiceViewer(tk.Tk):
     
     def load_gui(self):
         # Destroy loading screen
+        self.after_cancel(self.loading_loop_id)
         self.loading_canvas.destroy()
 
         # Create Frames
