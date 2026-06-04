@@ -575,7 +575,7 @@ class InvoiceViewer(tk.Tk):
         self.account_sum.set(f"Account Sum: {total}")
 
 
-    def sort_by(self, col, values=None, header_pressed=True):
+    def sort_by(self, col, values=None, header_pressed=True, watch_cursor=True):
         account_filter = self.account_text.get()
         if header_pressed:
             if col == self.sort_col:
@@ -586,7 +586,6 @@ class InvoiceViewer(tk.Tk):
 
         if not values:
             values = [self.tree.item(i, "values") for i in self.tree.get_children()]
-            self.tree.delete(*self.tree.get_children())
 
         def invoice_key(inv):
             if inv.isdigit():
@@ -610,6 +609,16 @@ class InvoiceViewer(tk.Tk):
         if col == "Vendor" or col == "Invoice" or col == "Company Name":
             reverse = not reverse
 
+        if watch_cursor:
+            self.config(cursor="watch")
+            self.tree.config(cursor="watch")
+            self.after(25, lambda: self.sort(col, values, keymap, reverse, account_filter))
+        else:
+            self.sort(col, values, keymap, reverse, account_filter)
+
+
+    def sort(self, col, values, keymap, reverse, account_filter):
+        self.tree.delete(*self.tree.get_children())
         values.sort(key=keymap[col], reverse=reverse)
         for i, row in enumerate(values):
             tag = "evenrow" if i % 2 == 0 else "oddrow"
@@ -661,6 +670,8 @@ class InvoiceViewer(tk.Tk):
             self.tree.heading(c, text=text)
         
         self.update_account_sum()
+        self.config(cursor="")
+        self.tree.config(cursor="")
         return "break"
 
 
@@ -816,7 +827,16 @@ class AutoCompleteEntry(tk.Entry):
         self.prev_company = company
         self.root.prev_invoice_text = invoice_prefix
         self.root.prev_account_text = account_filter
-        
+
+        # Set loading mouse icon
+        self.root.config(cursor="watch")
+        self.config(cursor="watch")
+        self.root.tree.config(cursor="watch")
+        self.root.amount_label.config(text="Loading...")
+        self.after(25, lambda: self.search(company, invoice_prefix, account_filter, narrow))
+
+    
+    def search(self, company, invoice_prefix, account_filter, narrow):
         if narrow:
             # Filter current rows
             invoice_count = self.root.filter_rows(company, invoice_prefix, account_filter)
@@ -825,8 +845,11 @@ class AutoCompleteEntry(tk.Entry):
             # Update treeview with invoices for selected company
             invoice_count, values = self.root.show_invoices(company, invoice_prefix, account_filter)
             # Resort
-            self.root.sort_by(self.root.sort_col, values, False)
+            self.root.sort_by(self.root.sort_col, values, header_pressed=False, watch_cursor=False)
         
+        self.root.config(cursor="")
+        self.config(cursor="")
+        self.root.tree.config(cursor="")
 
         if invoice_count == 0:
             self.root.amount_label.config(text="No invoices found.")
