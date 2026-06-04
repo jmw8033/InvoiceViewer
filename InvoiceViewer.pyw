@@ -1031,7 +1031,7 @@ class HelpPopup(tk.Toplevel):
         self.attributes("-topmost", True)
         self.protocol("WM_DELETE_WINDOW", self.toggle)
         self.bind("<space>", self.toggle)
-        self.geometry("700x200")
+        self.geometry("700x600")
 
         frame = tk.Frame(self)
         frame.pack(expand=True, fill="both")
@@ -1039,19 +1039,100 @@ class HelpPopup(tk.Toplevel):
         self.text = scrolledtext.ScrolledText(frame, font=font.Font(family="Consolas", size=9), wrap="none")
         self.text.pack(expand=True, fill="both")
 
-        about_text = """Welcome to Titan Invoice Viewer, here are some useful tips for operating this program
-- All data is collected at startup, press the Refresh button to view the most up to date information
-- Enter a company ID into the search bar to view all invoices for that company
-- Selecting "Search All Companies" will show every invoice
-- It also turns the Company ID bar to a filter only showing companies starting with your entry
-- The Invoice bar will only show invoices starting with your entry
-- Double left-click a row to open the invoice file if it is available
-- Left-click a column header to sort by that column, click again to swap direction
-- Left-click the ▼ in the Check Number column to display all associated checks
-- Hold Ctrl and left-click to select multiple individual rows, or hold Shift to select a range
+        
+        self.text.tag_configure("header", font=font.Font(family="Consolas", size=10, weight="bold"), spacing1=8)
+        self.text.tag_configure("title",  font=font.Font(family="Consolas", size=12, weight="bold"), spacing1=4)
+        self.text.tag_configure("body",   font=font.Font(family="Consolas", size=9), lmargin1=10, lmargin2=10)
+        self.text.tag_configure("indent", font=font.Font(family="Consolas", size=9), lmargin1=26, lmargin2=26)
+        self.text.tag_configure("footer", font=font.Font(family="Consolas", size=9), spacing1=10)
 
-All questions and suggestions can be directed to jmwesthoff@atlanticconcrete.com"""
-        self.text.insert(tk.END, about_text)
+        def h(text): self.text.insert(tk.END, text + "\n", "header")
+        def b(text): self.text.insert(tk.END, text + "\n", "body")
+        def i(text): self.text.insert(tk.END, text + "\n", "indent")
+        def f(text): self.text.insert(tk.END, text + "\n", "footer")
+
+        self.text.insert(tk.END, "Titan Invoice Viewer — Help\n", "title")
+
+        h("GETTING STARTED")
+        b("When the program opens it loads all invoice data from the Titan database and scans")
+        b("the invoice file directory. This takes a few seconds. Once loading is complete the")
+        b("main invoice table and search bar will appear.")
+        b("• Press the ⭮ Refresh button (top-right) at any time to reload the latest data.")
+        b("• Press the Errors button to see any invoices or files that had problems loading.")
+
+        h("SEARCHING FOR INVOICES")
+        b("Company ID  — Type a vendor ID into the Company ID box. A suggestion list will")
+        b("appear; click a result or press Enter to load that vendor's invoices.")
+        b("")
+        b("Search All Companies  — Check this box to show invoices across all vendors at once.")
+        b("In this mode the Company ID box becomes a prefix filter: typing 'AC' shows every")
+        b("vendor whose ID starts with 'AC', rather than requiring an exact match.")
+        b("")
+        b("Invoice  — Type in the Invoice box to narrow results to invoices whose number")
+        b("starts with your entry.")
+        b("")
+        b("Account  — Filter by GL account number or description. Entering digits matches")
+        b("account numbers starting with those digits. Entering text matches any account")
+        b("whose number or description contains that text.")
+        b("")
+        b("Plant  — Filter invoices by which plant they belong to:")
+        i("Both  — Show invoices from all plants (default)")
+        i("ACP   — Show only Atlantic Concrete invoices (Plant ID 110)")
+        i("APC   — Show only Atlantic Precast invoices (Plant ID 410)")
+        b("")
+        b("Start / End Date  — Only invoices within this date range will be shown. The")
+        b("Date Filter dropdown controls what kind of date is being filtered:")
+        i("Invoice Date  — Filters by the date printed on the invoice (default)")
+        i("Check Date    — Filters by the date the payment check was issued.")
+        b("                Note: in Check Date mode, invoices with no associated checks")
+        b("                are hidden, and only checks within the date range are shown")
+        b("                when expanding a multi-check row.")
+        b("")
+        b("File Available Only  — Check this box to hide any invoices that do not have a")
+        b("PDF file stored on the network drive.")
+
+        h("THE INVOICE TABLE")
+        b("Each row is one invoice. The columns show:")
+        i("Vendor          — The vendor ID code")
+        i("Company Name    — The vendor's full company name")
+        i("GL Account      — The expense account this invoice was coded to")
+        i("Invoice         — The invoice number")
+        i("Date            — The invoice date")
+        i("Invoice Amount  — The total dollar amount of the invoice")
+        i("Balance         — The remaining unpaid amount, or 'Paid In Full'")
+        i("Check Number    — The check used to pay this invoice")
+        i("Check Date      — The date that check was issued")
+        i("File Available  — A ✔ means a PDF of the invoice is stored on the network")
+
+        h("EXPANDING ROWS — GL ACCOUNTS AND CHECKS")
+        b("Some invoices are split across multiple expense accounts or were paid by more")
+        b("than one check. These rows show a ▼ arrow in the GL Account or Check Number")
+        b("column.")
+        b("• Click the ▼ in the GL Account column to expand and see each individual account")
+        b("  line with its account number, description, and amount. Account lines are")
+        b("  sorted by account number.")
+        b("• Click the ▼ in the Check Number column to expand and see each check with its")
+        b("  number, date, and payment amount. Checks are sorted newest first.")
+        b("• Click the ▲ again to collapse the row.")
+
+        h("OPENING INVOICE FILES")
+        b("Double left-click any row that has a ✔ in the File Available column to open the")
+        b("invoice PDF.")
+
+        h("SORTING")
+        b("Click any column header to sort the table by that column. Click the same header")
+        b("again to reverse the sort direction. The active sort column is marked with ▲ or ▼.")
+
+        h("SELECTING ROWS AND TOTALS")
+        b("Click a row to select it. The totals bar at the bottom of the window shows:")
+        i("Account Sum    — Sum of GL distribution amounts for all visible invoices")
+        i("Selected Total — Sum of Invoice Amount for only the rows you have selected")
+        i("Invoice Total  — Sum of Invoice Amount for all visible invoices")
+        i("Balance Total  — Sum of outstanding balances for all visible invoices")
+        b("To select multiple rows hold Ctrl and click individual rows, or hold Shift and")
+        b("click to select a continuous range.")
+
+        f("Questions and suggestions: jmwesthoff@atlanticconcrete.com")
 
 
     def toggle(self, *_):
