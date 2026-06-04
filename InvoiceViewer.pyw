@@ -1,4 +1,5 @@
 from tkinter import ttk, messagebox, scrolledtext, font, simpledialog
+import winsound
 from tkcalendar import DateEntry
 from collections import defaultdict
 from datetime import datetime
@@ -42,11 +43,16 @@ class InvoiceViewer(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_exit)  # runs exit protocol on window closed
 
         # Loading info
+        self.startup_sound()
         self.create_loading_screen()
 
         # Get data
         self.after(0, lambda: threading.Thread(target=self.load_data, daemon=True).start())
         self.loading_loop_id = self.after(50, self.loading_loop)
+
+
+    def startup_sound(self):
+        winsound.PlaySound("owin31", winsound.SND_ALIAS | winsound.SND_ASYNC)
 
 
     def create_loading_screen(self):
@@ -249,16 +255,13 @@ class InvoiceViewer(tk.Tk):
         ttk.Label(self.filter_frame, text="Company ID:").grid(row=0, column=0, padx=5)
         self.company_entry = AutoCompleteEntry(self)
         self.company_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        # Account Search bar
-        ttk.Label(self.filter_frame, text="Account:").grid(row=0, column=2, padx=5)
-        self.account_entry = tk.Entry(self.filter_frame)
-        self.account_entry.grid(row=0, column=3, padx=5)
-        self.account_text = tk.StringVar()
-        self.account_entry["textvariable"] = self.account_text
-        self.prev_account_text = ""
-        # When account text changes, rebuild using the new account filter
-        self.account_text.trace_add("write", lambda *_: self.company_entry.on_select(source="account"))
+        
+        # Date Filter Dropdown
+        ttk.Label(self.filter_frame, text="Date Filter:").grid(row=0, column=2, padx=5)
+        self.date_filter_var = tk.StringVar(value="Invoice Date")
+        self.date_filter_cb = ttk.Combobox(self.filter_frame, textvariable=self.date_filter_var, values=["Invoice Date", "Check Date"], width=12, state="readonly", justify="center")
+        self.date_filter_cb.grid(row=0, column=3, padx=5, sticky="ew")
+        self.date_filter_cb.bind("<<ComboboxSelected>>", self.company_entry.on_select)
 
         # Date ranges
         ttk.Label(self.filter_frame, text="Start date:").grid(row=0, column=4, padx=5)
@@ -287,18 +290,18 @@ class InvoiceViewer(tk.Tk):
         # Far right frame for buttons
         ttk.Label(self.filter_frame, text="                                                                                ").grid(row=0, column=10) # Spacer
         self.right_button_frame = ttk.Frame(self.filter_frame)
-        self.right_button_frame.grid(row=0, column=11, padx=5, sticky="e")
+        self.right_button_frame.grid(row=0, column=12, padx=35, sticky="e")
         # Refresh button
         self.refresh_button = tk.Button(self.right_button_frame, text="⭮", command=self.restart)
-        self.refresh_button.pack(side="left", padx=5)
+        self.refresh_button.pack(side="left", padx=2)
 
         # Help button
         self.help_button = tk.Button(self.right_button_frame, text="Help", command=lambda *_: self.help_popup.toggle())
-        self.help_button.pack(side="left", padx=5)
+        self.help_button.pack(side="left", padx=2)
 
         # Errors button
         self.errors_button = tk.Button(self.right_button_frame, text="Errors", command=lambda *_: self.error_popup.toggle())
-        self.errors_button.pack(side="left", padx=5)
+        self.errors_button.pack(side="left", padx=2)
 
         # Row 1
 
@@ -309,21 +312,28 @@ class InvoiceViewer(tk.Tk):
         self.invoice_text = tk.StringVar()
         self.prev_invoice_text = ""
         self.invoice_entry["textvariable"] = self.invoice_text
-        self.invoice_text.trace_add("write", lambda *_: self.company_entry.on_select(source="invoice"))
+        self.invoice_text.trace_add("write", lambda *_: self.company_entry.debounced_select(source="invoice"))
+
+        # Account Search bar
+        ttk.Label(self.filter_frame, text="Account:").grid(row=1, column=2, padx=5)
+        self.account_entry = tk.Entry(self.filter_frame)
+        self.account_entry.grid(row=1, column=3, padx=5)
+        self.account_text = tk.StringVar()
+        self.account_entry["textvariable"] = self.account_text
+        self.prev_account_text = ""
+        # When account text changes, rebuild using the new account filter
+        self.account_text.trace_add("write", lambda *_: self.company_entry.debounced_select(source="account"))
 
         # Plant Filter Dropdown
-        ttk.Label(self.filter_frame, text="Plant:").grid(row=1, column=2, padx=5)
+        ttk.Label(self.filter_frame, text="Plant:").grid(row=1, column=4, padx=5)
         self.plant_var = tk.StringVar(value="Both")
-        self.plant_cb = ttk.Combobox(self.filter_frame, textvariable=self.plant_var, values=["Both", "ACP", "APC"], width=6, state="readonly")
-        self.plant_cb.grid(row=1, column=3, padx=5, sticky="w")
+        self.plant_cb = ttk.Combobox(self.filter_frame, textvariable=self.plant_var, values=["Both", "ACP", "APC"], width=6, state="readonly", justify="center")
+        self.plant_cb.grid(row=1, column=5, padx=5, sticky="ew")
         self.plant_cb.bind("<<ComboboxSelected>>", self.company_entry.on_select)
 
-        # Date Filter Dropdown
-        ttk.Label(self.filter_frame, text="Date Filter:").grid(row=1, column=4, padx=5)
-        self.date_filter_var = tk.StringVar(value="Invoice Date")
-        self.date_filter_cb = ttk.Combobox(self.filter_frame, textvariable=self.date_filter_var, values=["Invoice Date", "Check Date"], width=12, state="readonly")
-        self.date_filter_cb.grid(row=1, column=5, padx=5)
-        self.date_filter_cb.bind("<<ComboboxSelected>>", self.company_entry.on_select)
+        # Clear Filters Button
+        self.clear_button = tk.Button(self.filter_frame, text="Clear Filters", command=self.clear_filters)
+        self.clear_button.grid(row=1, column=6, columnspan=2, padx=5, sticky="ew")
 
 
     def create_summary_bar(self):
@@ -337,7 +347,7 @@ class InvoiceViewer(tk.Tk):
         self.amount_label = ttk.Label(self.summary_frame, text="0 invoices found.", font=("TKDefaultFont", 10, "bold"))
         self.amount_label.grid(row=0, column=0, sticky="w", padx=10)
 
-        self.account_sum = tk.StringVar(value="Account Total: $0")
+        self.account_sum = tk.StringVar(value="Account Total: $0.00")
         self.account_sum_label = ttk.Label(self.summary_frame, textvariable=self.account_sum, font=("TKDefaultFont", 10))
         self.account_sum_label.grid(row=0, column=1, sticky="w")
 
@@ -345,11 +355,11 @@ class InvoiceViewer(tk.Tk):
         self.selected_sum_label = ttk.Label(self.summary_frame, textvariable=self.selected_sum, font=("TKDefaultFont", 10))
         self.selected_sum_label.grid(row=0, column=2, sticky="w")
 
-        self.invoice_total = tk.StringVar(value="Invoice Total: $0")
+        self.invoice_total = tk.StringVar(value="Invoice Total: $0.00")
         self.invoice_total_label = ttk.Label(self.summary_frame, textvariable=self.invoice_total, font=("TKDefaultFont", 10, "bold"))
         self.invoice_total_label.grid(row=0, column=3, sticky="w")
 
-        self.balance_total = tk.StringVar(value="Balance Total: $0")
+        self.balance_total = tk.StringVar(value="Balance Total: $0.00")
         self.balance_total_label = ttk.Label(self.summary_frame, textvariable=self.balance_total, font=("TKDefaultFont", 10, "bold"))
         self.balance_total_label.grid(row=0, column=4, sticky="w", padx=10)
 
@@ -556,6 +566,19 @@ class InvoiceViewer(tk.Tk):
         return len(self.tree.get_children())
     
 
+    def clear_filters(self):
+        self.company_entry.delete(0, "end")
+        self.invoice_entry.delete(0, "end")
+        self.account_entry.delete(0, "end")
+        self.plant_var.set("Both")
+        self.date_filter_var.set("Invoice Date")
+        self.start_entry.set_date("01/01/2014")
+        self.end_entry.set_date(datetime.today())
+        self.pdf_only.set(False)
+        self.show_invoices("", "", "")
+        self.update_account_sum()
+
+
     def update_account_sum(self):
         total = 0
         for row in self.tree.get_children():
@@ -572,7 +595,7 @@ class InvoiceViewer(tk.Tk):
                 amt = vals[5]
                 total += float(amt.replace("$", "").replace("(", "-").replace(",", "").replace(")", ""))
         total = f"${total:,.2f}" if total >= 0 else f"(${abs(total):,.2f})"
-        self.account_sum.set(f"Account Sum: {total}")
+        self.account_sum.set(f"Account Total: {total}")
 
 
     def sort_by(self, col, values=None, header_pressed=True, watch_cursor=True):
@@ -721,7 +744,7 @@ class InvoiceViewer(tk.Tk):
         if self.ignoring:
             self.ignore_label.grid_forget()
         else:
-            self.ignore_label.grid(row=0, column=11, sticky="w", padx=12)
+            self.ignore_label.grid(row=0, column=12, sticky="w", padx=39)
         self.company_entry.on_select()
         return "break"
 
@@ -751,6 +774,7 @@ class AutoCompleteEntry(tk.Entry):
         self.company = tk.StringVar()
         self.prev_company = ""
         self["textvariable"] = self.company 
+        self.search_job = None 
 
         self.text_trace = self.company.trace_add("write", self.show_suggestions)
         self.bind("<Return>", self.on_select)
@@ -944,11 +968,18 @@ class AutoCompleteEntry(tk.Entry):
     def toggle_all_companies(self):
         if self.root.all_companies.get():
             self.company.trace_remove("write", self.text_trace)
-            self.text_trace = self.company.trace_add("write", lambda *_: self.on_select(source="company"))
+            self.text_trace = self.company.trace_add("write", lambda *_: self.debounced_select(source="company"))
         else:
             self.company.trace_remove("write", self.text_trace)
             self.text_trace = self.company.trace_add("write", self.show_suggestions)
         self.on_select()
+
+
+    def debounced_select(self, *args, source=None):
+        if self.search_job is not None:
+            self.after_cancel(self.search_job)
+        
+        self.search_job = self.after(300, lambda: self.on_select(*args, source=source))
 
 
     def close_listbox(self, *_):
@@ -1148,7 +1179,7 @@ class HelpPopup(tk.Toplevel):
 
         h("SELECTING ROWS AND TOTALS")
         b("Click a row to select it. The totals bar at the bottom of the window shows:")
-        i("Account Sum    — Sum of GL distribution amounts for all visible invoices")
+        i("Account Total    — Sum of GL distribution amounts for all visible invoices")
         i("Selected Total — Sum of Invoice Amount for only the rows you have selected")
         i("Invoice Total  — Sum of Invoice Amount for all visible invoices")
         i("Balance Total  — Sum of outstanding balances for all visible invoices")
