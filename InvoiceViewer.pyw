@@ -1129,7 +1129,7 @@ class HelpPopup(tk.Toplevel):
         b("account numbers starting with those digits. Entering text matches any account")
         b("whose number or description contains that text.")
         b("")
-        b("Plant  — Filter invoices by which plant they belong to:")
+        b("Plant   — Filter invoices by which plant they belong to:")
         i("Both  — Show invoices from all plants (default)")
         i("ACP   — Show only Atlantic Concrete invoices (Plant ID 110)")
         i("APC   — Show only Atlantic Precast invoices (Plant ID 410)")
@@ -1179,7 +1179,7 @@ class HelpPopup(tk.Toplevel):
 
         h("SELECTING ROWS AND TOTALS")
         b("Click a row to select it. The totals bar at the bottom of the window shows:")
-        i("Account Total    — Sum of GL distribution amounts for all visible invoices")
+        i("Account Total  — Sum of GL distribution amounts for all visible invoices")
         i("Selected Total — Sum of Invoice Amount for only the rows you have selected")
         i("Invoice Total  — Sum of Invoice Amount for all visible invoices")
         i("Balance Total  — Sum of outstanding balances for all visible invoices")
