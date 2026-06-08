@@ -5,11 +5,11 @@ from collections import defaultdict
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
-import os, pymssql, time, threading, re, queue, sys, json, gc
+import os, pymssql, time, threading, re, queue, sys, json, gc, csv
 import babel.numbers
 
-
 INVOICE_DIR = r"S:\Titan_DM\Titan_Filing\AP_Invoices"
+LOG_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage_log.csv")
 invoice_re = re.compile(r'(\d+)')
 
 class InvoiceViewer(tk.Tk):
@@ -34,6 +34,8 @@ class InvoiceViewer(tk.Tk):
         self.accounts_by_vendor_invoice = defaultdict(list)
         self.account_description_by_account = {}
         self.missing_invoices = []
+
+        self.log_usage()
 
         # Ignore list for private vendors
         self.ignoring = True
@@ -133,6 +135,27 @@ class InvoiceViewer(tk.Tk):
         self.ignore_label = tk.Label(self.filter_frame, image=self.ignore_photo)
         self.bind("<Control-F9>", self.add_ignore)
         self.bind("<Control-F10>", self.toggle_ignore_list)
+
+
+    def log_usage(self):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        username  = os.environ.get("USERNAME",     "unknown")
+        computer  = os.environ.get("COMPUTERNAME", "unknown")
+
+        for attempt in range(5):
+            try:
+                is_new = not os.path.exists(LOG_PATH) or os.path.getsize(LOG_PATH) == 0
+                with open(LOG_PATH, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    if is_new:
+                        writer.writerow(["Date/Time", "Username", "Computer"])
+                    writer.writerow([timestamp, username, computer])
+                return
+            except PermissionError:
+                # Another machine is writing at the same moment — wait and retry
+                time.sleep(0.1 * (attempt + 1))
+            except Exception:
+                return  # Don't crash the program over a log write
 
 
     def load_database(self):
