@@ -583,7 +583,7 @@ class InvoiceViewer(tk.Tk):
         invoice_total = f"${invoice_total:,.2f}" if invoice_total >= 0 else f"(${abs(invoice_total):,.2f})"
         balance_total = f"${balance_total:,.2f}" if balance_total >= 0 else f"(${abs(balance_total):,.2f})"
         self.invoice_total.set(f"Invoice Total: {invoice_total}")
-        self.balance_total.set(f"Total: {balance_total}")
+        self.balance_total.set(f"Balance Total: {balance_total}")
 
         self.update_account_sum()
         
