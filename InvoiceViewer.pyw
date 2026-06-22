@@ -806,6 +806,7 @@ class AutoCompleteEntry(tk.Entry):
         self.bind("<Down>", lambda *_: self.listbox_move("down"))
         self.bind("<Escape>", self.close_listbox)
         self.tree.bind("<ButtonPress-1>", self.on_row_click, True)
+        self.tree.bind("<Button-3>", self.show_cell_menu, True)
         #self.tree.bind("<Double-1>", self.open_file)
 
 
@@ -945,6 +946,109 @@ class AutoCompleteEntry(tk.Entry):
             return "break"
         else:
             self.open_file(event)
+
+
+    def show_cell_menu(self, event):
+        # Only respond to right-clicks on an actual data cell
+        if self.tree.identify_region(event.x, event.y) != "cell":
+            return
+
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+
+        col_id = self.tree.identify_column(event.x)  # e.g. "#4"; "#0" is the hidden tree column
+        if col_id == "#0":
+            return
+
+        col_index = int(col_id[1:]) - 1
+        columns = self.tree["columns"]
+        if col_index < 0 or col_index >= len(columns):
+            return
+        col_name = columns[col_index]
+
+        # If the right-clicked row is part of an existing multi-row selection, keep that
+        # selection; otherwise select just the row under the cursor.
+        selection = self.tree.selection()
+        if row in selection and len(selection) > 1:
+            rows = self.ordered_selection()
+        else:
+            self.tree.selection_set(row)
+            self.tree.focus(row)
+            rows = [row]
+
+        # Strip any sort arrows from the heading for a clean menu label
+        heading = self.tree.heading(col_name)["text"].replace("  ▼", "").replace("  ▲", "").strip()
+
+        menu = tk.Menu(self.tree, tearoff=0)
+        if len(rows) > 1:
+            n = len(rows)
+            menu.add_command(label=f"Copy {heading} ({n} rows)", command=lambda: self.copy_column(rows, col_name))
+            menu.add_command(label=f"Copy Entire Rows ({n} rows)", command=lambda: self.copy_rows(rows))
+        else:
+            value = self.tree.set(row, col_name)
+            # Disable the cell copy if there's nothing meaningful to copy (blank / arrows / checkmark)
+            if value and value not in ("▼", "▲", "✔"):
+                menu.add_command(label=f"Copy {heading}", command=lambda: self.copy_to_clipboard(value))
+            else:
+                menu.add_command(label=f"Copy {heading}", state="disabled")
+            menu.add_command(label="Copy Entire Row", command=lambda: self.copy_row(row))
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+
+    def ordered_selection(self):
+        # Selected rows in top-to-bottom display order (parents before their subrows)
+        selected = set(self.tree.selection())
+        ordered = []
+        def walk(parent):
+            for child in self.tree.get_children(parent):
+                if child in selected:
+                    ordered.append(child)
+                walk(child)
+        walk("")
+        return ordered
+
+
+    def copy_to_clipboard(self, text):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+
+    def row_text(self, row):
+        # Visible columns for one row, tab-separated (skips the hidden Filepath helper column)
+        cells = []
+        for col in self.tree["columns"]:
+            if col == "Filepath":
+                continue
+            val = self.tree.set(row, col)
+            if val in ("▼", "▲"):  # collapse/expand arrows aren't real data
+                val = ""
+            cells.append(val)
+        return "\t".join(cells)
+
+
+    def copy_row(self, row):
+        self.copy_to_clipboard(self.row_text(row))
+
+
+    def copy_column(self, rows, col_name):
+        # One line per selected row, using that row's value for the given column
+        lines = []
+        for row in rows:
+            val = self.tree.set(row, col_name)
+            if val in ("▼", "▲"):
+                val = ""
+            lines.append(val)
+        self.copy_to_clipboard("\n".join(lines))
+
+
+    def copy_rows(self, rows):
+        # One selected row per line, each tab-separated across its visible columns
+        self.copy_to_clipboard("\n".join(self.row_text(row) for row in rows))
 
 
     def toggle_checks(self, row):
@@ -1153,7 +1257,7 @@ class HelpPopup(tk.Toplevel):
         b("account numbers starting with those digits. Entering text matches any account")
         b("whose number or description contains that text.")
         b("")
-        b("Plant   — Filter invoices by which plant they belong to:")
+        b("Plant — Filter invoices by which plant they belong to:")
         i("Both  — Show invoices from all plants (default)")
         i("ACP   — Show only Atlantic Concrete invoices (Plant ID 110)")
         i("APC   — Show only Atlantic Precast invoices (Plant ID 410)")
@@ -1197,6 +1301,18 @@ class HelpPopup(tk.Toplevel):
         b("Double left-click any row that has a ✔ in the File Available column to open the")
         b("invoice PDF.")
 
+        h("COPYING CELL DATA")
+        b("Right-click any cell to open a small menu with two options:")
+        i("Copy <Column>   — Copies just that cell, e.g. an invoice number or GL account")
+        i("Copy Entire Row — Copies the whole row, tab-separated (pastes neatly into Excel)")
+        b("")
+        b("To copy several rows at once, select them first (Ctrl-click or Shift-click), then")
+        b("right-click any cell within the selection. The menu changes to:")
+        i("Copy <Column> (N rows)    — Copies that one column's value from every selected row,")
+        i("                            one per line")
+        i("Copy Entire Rows (N rows) — Copies every selected row in full, one row per line")
+        b("Both multi-row options paste straight into Excel as rows and columns.")
+
         h("SORTING")
         b("Click any column header to sort the table by that column. Click the same header")
         b("again to reverse the sort direction. The active sort column is marked with ▲ or ▼.")
@@ -1210,7 +1326,7 @@ class HelpPopup(tk.Toplevel):
         b("To select multiple rows hold Ctrl and click individual rows, or hold Shift and")
         b("click to select a continuous range.")
 
-        f("Questions and suggestions: jmwesthoff@atlanticconcrete.com")
+        f("Questions or suggestions can be sent to jmwesthoff@atlanticconcrete.com")
 
 
     def toggle(self, *_):
