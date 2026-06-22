@@ -5,8 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
-import os, pymssql, time, threading, re, queue, sys, json, gc, csv
-import babel.numbers
+import os, pymssql, time, threading, re, queue, json, gc, csv
 
 INVOICE_DIR = r"S:\Titan_DM\Titan_Filing\AP_Invoices"
 LOG_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage_log.csv")
