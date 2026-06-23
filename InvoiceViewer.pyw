@@ -992,6 +992,7 @@ class AutoCompleteEntry(tk.Entry):
             else:
                 menu.add_command(label=f"Copy {heading}", state="disabled")
             menu.add_command(label="Copy Entire Row", command=lambda: self.copy_row(row))
+            menu.add_command(label="Copy Date & Invoice", command=lambda: self.copy_date_invoice(row))
 
         try:
             menu.tk_popup(event.x_root, event.y_root)
@@ -1032,6 +1033,14 @@ class AutoCompleteEntry(tk.Entry):
 
     def copy_row(self, row):
         self.copy_to_clipboard(self.row_text(row))
+
+
+    def copy_date_invoice(self, row):
+        # Copy just the date and invoice number for one row, tab-separated
+        date = self.tree.set(row, "Date")
+        invoice = self.tree.set(row, "Invoice")
+        date_formatted = datetime.strptime(date, "%Y-%m-%d").strftime("%m-%d-%y")
+        self.copy_to_clipboard(f"{date_formatted}_{invoice}")
 
 
     def copy_column(self, rows, col_name):
@@ -1301,9 +1310,10 @@ class HelpPopup(tk.Toplevel):
         b("invoice PDF.")
 
         h("COPYING CELL DATA")
-        b("Right-click any cell to open a small menu with two options:")
+        b("Right-click any cell to open a small menu with three options:")
         i("Copy <Column>   — Copies just that cell, e.g. an invoice number or GL account")
         i("Copy Entire Row — Copies the whole row, tab-separated (pastes neatly into Excel)")
+        i("Copy Date & Invoice — Copies the date and invoice number for one row, underscore-separated")
         b("")
         b("To copy several rows at once, select them first (Ctrl-click or Shift-click), then")
         b("right-click any cell within the selection. The menu changes to:")
