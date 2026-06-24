@@ -305,6 +305,11 @@ class InvoiceViewer(tk.Tk):
         self.all_companies_cb = ttk.Checkbutton(self.filter_frame, text="Search All Companies", variable=self.all_companies, command=self.company_entry.toggle_all_companies, takefocus=False)
         self.all_companies_cb.grid(row=0, column=8, padx=5)
 
+        # Search names checkbox - when on, the company box also matches vendor names, not just IDs
+        self.search_names = tk.BooleanVar()
+        self.search_names_cb = ttk.Checkbutton(self.filter_frame, text="Search Names", variable=self.search_names, command=self.company_entry.on_select, takefocus=False)
+        self.search_names_cb.grid(row=1, column=8, padx=5, sticky="w")
+
         # PDF Only Checkbox
         self.pdf_only = tk.BooleanVar()
         self.pdf_cb = ttk.Checkbutton(self.filter_frame, text="File Available Only", variable=self.pdf_only, command=self.company_entry.on_select, takefocus=False)
@@ -462,7 +467,7 @@ class InvoiceViewer(tk.Tk):
 
             # Check company, invoice prefix, and account filter
             vendor = str(entry["VendorID"])
-            if (self.all_companies.get() and not vendor.lower().startswith(company.lower())) or (self.ignoring and vendor in self.ignore_list):
+            if self.ignoring and vendor in self.ignore_list:
                 continue
             search = company.lower()
             name_match = self.search_names.get() and bool(search) and search in str(entry["CompanyName"]).lower()
