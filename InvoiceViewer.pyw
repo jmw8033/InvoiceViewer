@@ -464,8 +464,14 @@ class InvoiceViewer(tk.Tk):
             vendor = str(entry["VendorID"])
             if (self.all_companies.get() and not vendor.lower().startswith(company.lower())) or (self.ignoring and vendor in self.ignore_list):
                 continue
-            if not self.all_companies.get() and vendor.lower() != company.lower():
-                continue
+            search = company.lower()
+            name_match = self.search_names.get() and bool(search) and search in str(entry["CompanyName"]).lower()
+            if self.all_companies.get():
+                if search and not (vendor.lower().startswith(search) or name_match):
+                    continue
+            else:
+                if not (vendor.lower() == search or name_match):
+                    continue
             if account_filter:
                 gl_accounts = self.accounts_by_vendor_invoice[(vendor, str(entry["InvoiceNum"]))].copy()
                 matched = False
@@ -552,7 +558,9 @@ class InvoiceViewer(tk.Tk):
         for row in self.tree.get_children():
             values = self.tree.item(row, "values")
             # Check company and invoice prefix
-            if not values[0].lower().startswith(company.lower()) or not values[3].lower().startswith(invoice_prefix.lower()):
+            company_l = company.lower()
+            company_ok = values[0].lower().startswith(company_l) or (self.search_names.get() and company_l in values[1].lower())
+            if not company_ok or not values[3].lower().startswith(invoice_prefix.lower()):
                 self.tree.delete(row)
             elif values[2] in ("▼", "▲"): # Has subrows, need to check each subrow for account filter
                 subrows = self.tree.get_children(row)
@@ -816,7 +824,10 @@ class AutoCompleteEntry(tk.Entry):
             self.close_listbox()
             return
 
-        matches = [w for w in self.company_ids if w[0].lower().startswith(text.lower()) and (not self.root.ignoring or not w[2])]
+        matches = [w for w in self.company_ids
+                   if (w[0].lower().startswith(text.lower())
+                       or (self.root.search_names.get() and text.lower() in w[1].lower()))
+                   and (not self.root.ignoring or not w[2])]
         if not matches:
             self.close_listbox()
             return
@@ -854,7 +865,12 @@ class AutoCompleteEntry(tk.Entry):
                         self.company.set(self.listbox.item(items[0], "values")[0])
 
             company = self.company.get()
-            if not any(company in tup for tup in self.company_ids):   
+            if self.root.search_names.get():
+                company_l = company.lower()
+                valid = any(tup[0].lower() == company_l or company_l in tup[1].lower() for tup in self.company_ids)
+            else:
+                valid = any(company in tup for tup in self.company_ids)
+            if not valid:
                 self.tree.delete(*self.tree.get_children())
                 return
         else:
@@ -1257,6 +1273,11 @@ class HelpPopup(tk.Toplevel):
         b("Search All Companies  — Check this box to show invoices across all vendors at once.")
         b("In this mode the Company ID box becomes a prefix filter: typing 'AC' shows every")
         b("vendor whose ID starts with 'AC', rather than requiring an exact match.")
+        b("")
+        b("Search Names  — Check this box to also match vendor names, not just IDs. With it on,")
+        b("typing part of a name (e.g. 'concrete') finds every vendor whose name contains that")
+        b("text, and the suggestion list shows those matches too. Works alongside the options")
+        b("above. Leave it off to search by vendor ID only.")
         b("")
         b("Invoice  — Type in the Invoice box to narrow results to invoices whose number")
         b("starts with your entry.")
