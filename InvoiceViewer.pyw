@@ -37,6 +37,7 @@ class InvoiceViewer(tk.Tk):
         self.ap_by_company_invoice = {}
         self.cd_by_company_check = {}
         self.check_record_ids_by_ap_record = defaultdict(list)
+        self.check_ids_by_ap_record = defaultdict(list)
 
         self.log_usage()
 
@@ -197,19 +198,27 @@ class InvoiceViewer(tk.Tk):
             conn = pymssql.connect(server="ACAPP1", user="titan", password="titan", database="titan")
 
             with conn.cursor(as_dict=True) as cur:
+                # --- UPDATE: ADDED CH.CheckID TO SELECT ---
                 cur.execute("""
-                    SELECT CH.CheckNum, CH.CheckDate, CD.InvoiceNum, CD.Amount, CH.VendorID, CD.RecordID, CD.AP_Record
+                    SELECT CH.CheckNum, CH.CheckDate, CD.InvoiceNum, CD.Amount, CH.VendorID, CD.RecordID, CD.AP_Record, CH.CheckID
                     FROM Check_Header CH
                     JOIN Check_Detail CD ON CH.CheckID = CD.CheckID
                 """)
                 data=cur.fetchall()
             for row in data:
                 self.checks_by_vendor_invoice[(row["VendorID"], row["InvoiceNum"])].append((row["CheckNum"], row["CheckDate"], row["Amount"]))
+                
                 ap_rec = row.get("AP_Record")
                 rec_id = row.get("RecordID")
-                # Add the RecordID if it exists and hasn't been added to this AP_Record yet
-                if ap_rec and rec_id and rec_id not in self.check_record_ids_by_ap_record[ap_rec]:
-                    self.check_record_ids_by_ap_record[ap_rec].append(rec_id)
+                chk_id = row.get("CheckID")
+                
+                if ap_rec:
+                    # Append RecordID
+                    if rec_id and rec_id not in self.check_record_ids_by_ap_record[ap_rec]:
+                        self.check_record_ids_by_ap_record[ap_rec].append(rec_id)
+                    # Append CheckID
+                    if chk_id and chk_id not in self.check_ids_by_ap_record[ap_rec]:
+                        self.check_ids_by_ap_record[ap_rec].append(chk_id)
 
             conn.close()
             t1 = time.perf_counter()
@@ -791,6 +800,7 @@ class InvoiceViewer(tk.Tk):
         self.ap_by_company_invoice.clear()
         self.cd_by_company_check.clear()
         self.check_record_ids_by_ap_record.clear()
+        self.check_ids_by_ap_record.clear()
 
         self.columnconfigure(0, weight=0)
         self.rowconfigure(0, weight=0)
@@ -1053,7 +1063,12 @@ class AutoCompleteEntry(tk.Entry):
                         # 1a. Check Detail IDs via Record Number
                         check_rec_ids = self.root.check_record_ids_by_ap_record.get(record_num, [])
                         for check_rec_id in check_rec_ids:
-                            menu.add_command(label=f"Check Detail ID: {check_rec_id}", state="disabled")
+                            menu.add_command(label=f"Check Record ID: {check_rec_id}", state="disabled")
+
+                        # 1b. Check IDs via Record Number    
+                        check_ids = self.root.check_ids_by_ap_record.get(record_num, [])
+                        for check_id in check_ids:
+                            menu.add_command(label=f"Check ID: {check_id}", state="disabled")
 
                     # 2. AP Number
                     ap_num = self.root.ap_by_company_invoice.get((company_name, invoice))
@@ -1406,9 +1421,9 @@ class HelpPopup(tk.Toplevel):
 
         h("DATABASE REFERENCES AND COPYING DATA")
         b("Right-click any cell to open a small menu")
-        i("The top of the menu shows the invoice's Record Number, Check Detail ID, AP Journal ID, and CD Journal ID(s) if available")
+        i("The top of the menu shows the invoice's Record Number, Check Record ID, Check ID, AP Journal ID, and CD Journal ID(s) if available")
         i("The Record Number can be used to find invoices in the AP_Header table, and the Journal IDs can be used for the AP_Journal_Detail_Source table")
-        i("The Check Detail ID can be used to find invoices in the Check_Detail table")
+        i("The Check Detail ID can be used to find invoices in the Check_Detail table, while the Check ID can also be used for the Check_Header table")
         i("Copy <Column>   — Copies just that cell, e.g. an invoice number or GL account")
         i("Copy Entire Row — Copies the whole row, tab-separated (pastes neatly into Excel)")
         i("Copy Date & Invoice — Copies the date and invoice number for one row, underscore-separated")
