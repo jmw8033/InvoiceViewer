@@ -38,6 +38,7 @@ class InvoiceViewer(tk.Tk):
         self.cd_by_check_id = {}
         self.check_record_ids_by_ap_record = defaultdict(list)
         self.check_ids_by_ap_record = defaultdict(list)
+        self.duplicate_invoices = []
 
         self.log_usage()
 
@@ -131,7 +132,7 @@ class InvoiceViewer(tk.Tk):
         self.create_treeview()
         self.create_filter_frame()
         self.create_summary_bar()
-        self.error_popup = ErrorPopup(self, self.broken_companies, self.broken_invoices, self.missing_invoices)
+        self.error_popup = ErrorPopup(self, self.broken_companies, self.broken_invoices, self.missing_invoices, self.duplicate_invoices)
         self.help_popup = HelpPopup(self)
 
         # Ignore list image
@@ -183,6 +184,15 @@ class InvoiceViewer(tk.Tk):
 
             self.invoices = [row for row in data if row["VendorID"] and row["InvoiceNum"] and row["InvoiceDate"] 
                             and row["Subtotal"] is not None and row["Payments"] is not None]
+            # Check for duplicate invoices
+            seen_invoices = set()
+            for row in self.invoices:
+                key = (row["VendorID"], row["InvoiceNum"])
+                if key in seen_invoices:
+                    # Format a clean string to show in the error menu
+                    self.duplicate_invoices.append(f"{row['VendorID']} - {row['InvoiceNum']} (Record: {row.get('RecordNum', 'N/A')})")
+                else:
+                    seen_invoices.add(key)
             self.broken_companies = [row for row in data if not (row["VendorID"] and row["InvoiceNum"] and row["InvoiceDate"] 
                                      and row["Subtotal"] is not None and row["Payments"] is not None)]
             self.company_ids = {(row["VendorID"], row["CompanyName"], row["VendorID"] in self.ignore_list) for row in self.invoices if row["VendorID"] and row["CompanyName"]}
@@ -803,6 +813,7 @@ class InvoiceViewer(tk.Tk):
         self.cd_by_check_id = {}
         self.check_record_ids_by_ap_record.clear()
         self.check_ids_by_ap_record.clear()
+        self.duplicate_invoices.clear()
 
         self.columnconfigure(0, weight=0)
         self.rowconfigure(0, weight=0)
@@ -1254,7 +1265,7 @@ class AutoCompleteEntry(tk.Entry):
 
 
 class ErrorPopup(tk.Toplevel):
-    def __init__(self, root, terrors, ierrors, missing:list[tuple], **kw):
+    def __init__(self, root, terrors, ierrors, missing:list[tuple], duplicates:list[str], **kw):
         super().__init__(root, **kw)
         self.root = root
         self.title("Error Page")
@@ -1285,6 +1296,13 @@ class ErrorPopup(tk.Toplevel):
         self.text.insert(tk.END, f"\n {len(ierrors)} Invoice File Errors\n", ("bold",))
         for row in ierrors:
             self.text.insert(tk.END, f" -{row}\n")
+
+            
+        # Duplicate Invoices
+        if duplicates:
+            self.text.insert(tk.END, f"\n {len(duplicates)} Duplicate Invoices Found in Database\n", ("bold",))
+            for row in duplicates:
+                self.text.insert(tk.END, f" -{row}\n")
 
         # Missing invoice files
         missing.sort(key=lambda x: (x[0], -datetime.strptime(x[2], "%m-%d-%Y").timestamp()))
