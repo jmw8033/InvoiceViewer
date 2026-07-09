@@ -34,8 +34,8 @@ class InvoiceViewer(tk.Tk):
         self.accounts_by_vendor_invoice = defaultdict(list)
         self.account_description_by_account = {}
         self.missing_invoices = []
-        self.ap_by_company_invoice = {}
-        self.cd_by_company_check = {}
+        self.ap_by_record_num = {}
+        self.cd_by_check_id = {}
         self.check_record_ids_by_ap_record = defaultdict(list)
         self.check_ids_by_ap_record = defaultdict(list)
 
@@ -250,21 +250,23 @@ class InvoiceViewer(tk.Tk):
             conn = pymssql.connect(server="ACAPP1", user="titan", password="titan", database="titan")
             with conn.cursor(as_dict=True) as cur:
                 cur.execute("""
-                    SELECT JournalID, SourceReferenceID, SourceDescription
+                    SELECT JournalID, SourceRecordID
                     FROM GL_Journal_Detail_Source
-                    WHERE JournalID LIKE 'AP%' OR JournalID LIKE 'CD%'
                 """)
                 data = cur.fetchall()
 
             for row in data:
                 jid = row["JournalID"]
-                invoice_num = str(row["SourceReferenceID"]).strip()
-                company_name = str(row["SourceDescription"]).strip()
+                # Cast to int to perfectly match RecordNum and CheckID
+                try:
+                    rec_id = int(row["SourceRecordID"])
+                except (ValueError, TypeError):
+                    rec_id = row["SourceRecordID"] # Fallback if data is unexpectedly non-numeric
                 
                 if jid.startswith("AP"):
-                    self.ap_by_company_invoice[(company_name, invoice_num)] = jid
+                    self.ap_by_record_num[rec_id] = jid
                 elif jid.startswith("CD"):
-                    self.cd_by_company_check[(company_name, invoice_num)] = jid
+                    self.cd_by_check_id[rec_id] = jid
 
             conn.close()
             t1 = time.perf_counter()
@@ -797,8 +799,8 @@ class InvoiceViewer(tk.Tk):
         self.accounts_by_vendor_invoice.clear()
         self.missing_invoices.clear()
         self.account_description_by_account.clear()
-        self.ap_by_company_invoice.clear()
-        self.cd_by_company_check.clear()
+        self.ap_by_record_num = {}
+        self.cd_by_check_id = {}
         self.check_record_ids_by_ap_record.clear()
         self.check_ids_by_ap_record.clear()
 
@@ -1056,38 +1058,31 @@ class AutoCompleteEntry(tk.Entry):
                 if row_data:
                     company_name = str(row_data.get("CompanyName", "")).strip()
 
-                    # 1. Record Number
                     if "RecordNum" in row_data:
                         record_num = row_data["RecordNum"]
+                        
+                        # 1. Record Number
                         menu.add_command(label=f"Record Number: {record_num}", state="disabled")
-                        # 1a. Check Detail IDs via Record Number
+
+                        # 3. Check Detail Record IDs
                         check_rec_ids = self.root.check_record_ids_by_ap_record.get(record_num, [])
                         for check_rec_id in check_rec_ids:
-                            menu.add_command(label=f"Check Record ID: {check_rec_id}", state="disabled")
+                            menu.add_command(label=f"Check Detail ID: {check_rec_id}", state="disabled")
 
-                        # 1b. Check IDs via Record Number    
+                        # 3. AP Number (Mapped via RecordNum)
+                        ap_num = self.root.ap_by_record_num.get(record_num)
+                        if ap_num:
+                            menu.add_command(label=f"Journal ID: {ap_num}", state="disabled")
+
+                        # 4. Check IDs & CD Numbers (Mapped via CheckID)
                         check_ids = self.root.check_ids_by_ap_record.get(record_num, [])
                         for check_id in check_ids:
+                            cd_num = self.root.cd_by_check_id.get(check_id)
+                            if cd_num:
+                                menu.add_command(label=f"Journal ID: {cd_num}", state="disabled")
                             menu.add_command(label=f"Check ID: {check_id}", state="disabled")
-
-                    # 2. AP Number
-                    ap_num = self.root.ap_by_company_invoice.get((company_name, invoice))
-                    if ap_num:
-                        menu.add_command(label=f"Journal ID: {ap_num}", state="disabled")
-
-                    # 3. CD Number(s) via Checks
-                    checks = self.root.checks_by_vendor_invoice.get((vendor, invoice), [])
-                    cd_nums = []
-                    for cnum, cdate, camt in checks:
-                        cd_num = self.root.cd_by_company_check.get((company_name, str(cnum).strip()))
-                        if cd_num and cd_num not in cd_nums:
-                            cd_nums.append(cd_num)
-
-                    for cd_num in cd_nums:
-                        menu.add_command(label=f"Journal ID: {cd_num}", state="disabled")
-
-                    # Add separator after informational headers
-                    if "RecordNum" in row_data or ap_num or cd_nums:
+                            
+                        # Add separator after informational headers
                         menu.add_separator()
 
             value = self.tree.set(row, col_name)
