@@ -1396,7 +1396,7 @@ class HelpPopup(tk.Toplevel):
 
         h("COPYING CELL DATA")
         b("Right-click any cell to open a small menu")
-        i("The top of the menu shows the invoice's Record Number")
+        i("The top of the menu shows the invoice's Record Number, AP Journal ID, and CD Journal ID(s) if available")
         i("Copy <Column>   — Copies just that cell, e.g. an invoice number or GL account")
         i("Copy Entire Row — Copies the whole row, tab-separated (pastes neatly into Excel)")
         i("Copy Date & Invoice — Copies the date and invoice number for one row, underscore-separated")
