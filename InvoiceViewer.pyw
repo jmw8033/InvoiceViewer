@@ -1031,7 +1031,7 @@ class AutoCompleteEntry(tk.Entry):
         if len(rows) > 1:
             n = len(rows)
             menu.add_command(label=f"Copy {heading} ({n} rows)", command=lambda: self.copy_column(rows, col_name))
-            menu.add_command(label=f"Copy Entire Rows ({n} rows)", command=lambda: self.copy_rows(rows))
+            menu.add_command(label=f"Copy Rows ({n} rows)", command=lambda: self.copy_rows(rows))
         else:
             # Show Invoice Record Number
             parent_id = self.tree.parent(row)
@@ -1081,7 +1081,7 @@ class AutoCompleteEntry(tk.Entry):
                 menu.add_command(label=f"Copy {heading}", command=lambda: self.copy_to_clipboard(value))
             else:
                 menu.add_command(label=f"Copy {heading}", state="disabled")
-            menu.add_command(label="Copy Entire Row", command=lambda: self.copy_row(row))
+            menu.add_command(label="Copy Row", command=lambda: self.copy_row(row))
             menu.add_command(label="Copy Date & Invoice", command=lambda: self.copy_date_invoice(row))
 
         try:
