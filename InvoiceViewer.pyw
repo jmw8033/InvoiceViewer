@@ -170,7 +170,7 @@ class InvoiceViewer(tk.Tk):
 
             with conn.cursor(as_dict=True) as cur:
                 cur.execute("""
-                    SELECT APH.VendorID, APH.InvoiceNum, APH.InvoiceDate, APH.Subtotal, APH.Payments, APH.PlantID, V.CompanyName
+                    SELECT APH.VendorID, APH.InvoiceNum, APH.InvoiceDate, APH.Subtotal, APH.Payments, APH.PlantID, APH.RecordNum, V.CompanyName
                     FROM AP_Header APH
                     JOIN Vendors V ON APH.VendorID = V.VendorId
                 """)
@@ -1006,6 +1006,22 @@ class AutoCompleteEntry(tk.Entry):
             menu.add_command(label=f"Copy {heading} ({n} rows)", command=lambda: self.copy_column(rows, col_name))
             menu.add_command(label=f"Copy Entire Rows ({n} rows)", command=lambda: self.copy_rows(rows))
         else:
+            # Show Invoice Record Number
+            parent_id = self.tree.parent(row)
+            target_row = parent_id if parent_id else row
+            
+            vendor = self.tree.set(target_row, "Vendor")
+            invoice = self.tree.set(target_row, "Invoice")
+            
+            if vendor and invoice:
+                # Fetch full row data from the dictionary built during load
+                row_data = self.root.by_vendor_invoice.get((vendor, invoice))
+                if row_data and "RecordNum" in row_data:
+                    record_num = row_data["RecordNum"]
+                    # Add as disabled text, followed by a separator line
+                    menu.add_command(label=f"Record Number: {record_num}", state="disabled")
+                    menu.add_separator()
+
             value = self.tree.set(row, col_name)
             # Disable the cell copy if there's nothing meaningful to copy (blank / arrows / checkmark)
             if value and value not in ("▼", "▲", "✔"):
@@ -1267,29 +1283,29 @@ class HelpPopup(tk.Toplevel):
         h("GETTING STARTED")
         b("When the program opens it loads all invoice data from the Titan database and scans")
         b("the invoice file directory. This takes a few seconds. Once loading is complete the")
-        b("main invoice table and search bar will appear.")
-        b("• Press the ⭮ Refresh button (top-right) at any time to reload the latest data.")
-        b("• Press the Errors button to see any invoices or files that had problems loading.")
+        b("main invoice table and search bar will appear")
+        b("• Press the ⭮ Refresh button (top-right) at any time to reload the latest data")
+        b("• Press the Errors button to see any invoices or files that had problems loading")
 
         h("SEARCHING FOR INVOICES")
         b("Company ID  — Type a vendor ID into the Company ID box. A suggestion list will")
-        b("appear; click a result or press Enter to load that vendor's invoices.")
+        b("appear; click a result or press Enter to load that vendor's invoices")
         b("")
-        b("Search All Companies  — Check this box to show invoices across all vendors at once.")
+        b("Search All Companies  — Check this box to show invoices across all vendors at once")
         b("In this mode the Company ID box becomes a prefix filter: typing 'AC' shows every")
-        b("vendor whose ID starts with 'AC', rather than requiring an exact match.")
+        b("vendor whose ID starts with 'AC', rather than requiring an exact match")
         b("")
         b("Search Names  — Check this box to also match vendor names, not just IDs. With it on,")
         b("typing part of a name (e.g. 'concrete') finds every vendor whose name contains that")
         b("text, and the suggestion list shows those matches too. Works alongside the options")
-        b("above. Leave it off to search by vendor ID only.")
+        b("above. Leave it off to search by vendor ID only")
         b("")
         b("Invoice  — Type in the Invoice box to narrow results to invoices whose number")
-        b("starts with your entry.")
+        b("starts with your entry")
         b("")
         b("Account  — Filter by GL account number or description. Entering digits matches")
         b("account numbers starting with those digits. Entering text matches any account")
-        b("whose number or description contains that text.")
+        b("whose number or description contains that text")
         b("")
         b("Plant — Filter invoices by which plant they belong to:")
         i("Both  — Show invoices from all plants (default)")
@@ -1302,10 +1318,10 @@ class HelpPopup(tk.Toplevel):
         i("Check Date    — Filters by the date the payment check was issued.")
         b("                Note: in Check Date mode, invoices with no associated checks")
         b("                are hidden, and only checks within the date range are shown")
-        b("                when expanding a multi-check row.")
+        b("                when expanding a multi-check row")
         b("")
         b("File Available Only  — Check this box to hide any invoices that do not have a")
-        b("PDF file stored on the network drive.")
+        b("PDF file stored on the network drive")
 
         h("THE INVOICE TABLE")
         b("Each row is one invoice. The columns show:")
@@ -1323,20 +1339,21 @@ class HelpPopup(tk.Toplevel):
         h("EXPANDING ROWS — GL ACCOUNTS AND CHECKS")
         b("Some invoices are split across multiple expense accounts or were paid by more")
         b("than one check. These rows show a ▼ arrow in the GL Account or Check Number")
-        b("column.")
+        b("column")
         b("• Click the ▼ in the GL Account column to expand and see each individual account")
         b("  line with its account number, description, and amount. Account lines are")
-        b("  sorted by account number.")
+        b("  sorted by account number")
         b("• Click the ▼ in the Check Number column to expand and see each check with its")
-        b("  number, date, and payment amount. Checks are sorted newest first.")
-        b("• Click the ▲ again to collapse the row.")
+        b("  number, date, and payment amount. Checks are sorted newest first")
+        b("• Click the ▲ again to collapse the row")
 
         h("OPENING INVOICE FILES")
         b("Double left-click any row that has a ✔ in the File Available column to open the")
-        b("invoice PDF.")
+        b("invoice PDF")
 
         h("COPYING CELL DATA")
-        b("Right-click any cell to open a small menu with three options:")
+        b("Right-click any cell to open a small menu")
+        i("The top of the menu shows the invoice's Record Number")
         i("Copy <Column>   — Copies just that cell, e.g. an invoice number or GL account")
         i("Copy Entire Row — Copies the whole row, tab-separated (pastes neatly into Excel)")
         i("Copy Date & Invoice — Copies the date and invoice number for one row, underscore-separated")
@@ -1346,11 +1363,11 @@ class HelpPopup(tk.Toplevel):
         i("Copy <Column> (N rows)    — Copies that one column's value from every selected row,")
         i("                            one per line")
         i("Copy Entire Rows (N rows) — Copies every selected row in full, one row per line")
-        b("Both multi-row options paste straight into Excel as rows and columns.")
+        b("Both multi-row options paste straight into Excel as rows and columns")
 
         h("SORTING")
         b("Click any column header to sort the table by that column. Click the same header")
-        b("again to reverse the sort direction. The active sort column is marked with ▲ or ▼.")
+        b("again to reverse the sort direction. The active sort column is marked with ▲ or ▼")
 
         h("SELECTING ROWS AND TOTALS")
         b("Click a row to select it. The totals bar at the bottom of the window shows:")
@@ -1359,7 +1376,7 @@ class HelpPopup(tk.Toplevel):
         i("Invoice Total  — Sum of Invoice Amount for all visible invoices")
         i("Balance Total  — Sum of outstanding balances for all visible invoices")
         b("To select multiple rows hold Ctrl and click individual rows, or hold Shift and")
-        b("click to select a continuous range.")
+        b("click to select a continuous range")
 
         f("Questions or suggestions can be sent to jmwesthoff@atlanticconcrete.com")
 
