@@ -1075,23 +1075,26 @@ class AutoCompleteEntry(tk.Entry):
                         # 1. Record Number
                         menu.add_command(label=f"Record Number: {record_num}", state="disabled")
 
-                        # 3. Check Detail Record IDs
+                        # 2. Check Detail Record IDs
                         check_rec_ids = self.root.check_record_ids_by_ap_record.get(record_num, [])
                         for check_rec_id in check_rec_ids:
                             menu.add_command(label=f"Check Detail ID: {check_rec_id}", state="disabled")
 
-                        # 3. AP Number (Mapped via RecordNum)
+                        # 3. Check IDs (Mapped via CheckID)
+                        check_ids = self.root.check_ids_by_ap_record.get(record_num, [])
+                        for check_id in check_ids:
+                            menu.add_command(label=f"Check ID: {check_id}", state="disabled")
+
+                        # 4. AP Number (Mapped via RecordNum)
                         ap_num = self.root.ap_by_record_num.get(record_num)
                         if ap_num:
                             menu.add_command(label=f"Journal ID: {ap_num}", state="disabled")
 
-                        # 4. Check IDs & CD Numbers (Mapped via CheckID)
-                        check_ids = self.root.check_ids_by_ap_record.get(record_num, [])
+                        # 5. CD Number (Mapped via CheckID)
                         for check_id in check_ids:
                             cd_num = self.root.cd_by_check_id.get(check_id)
                             if cd_num:
                                 menu.add_command(label=f"Journal ID: {cd_num}", state="disabled")
-                            menu.add_command(label=f"Check ID: {check_id}", state="disabled")
                             
                         # Add separator after informational headers
                         menu.add_separator()
