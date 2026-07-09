@@ -1,4 +1,5 @@
 from tkinter import ttk, messagebox, scrolledtext, font, simpledialog
+from weakref import ref
 import winsound
 from tkcalendar import DateEntry
 from collections import defaultdict
@@ -33,6 +34,8 @@ class InvoiceViewer(tk.Tk):
         self.accounts_by_vendor_invoice = defaultdict(list)
         self.account_description_by_account = {}
         self.missing_invoices = []
+        self.ap_by_company_invoice = {}
+        self.cd_by_company_check = {}
 
         self.log_usage()
 
@@ -190,12 +193,7 @@ class InvoiceViewer(tk.Tk):
         def load_checks():
             t0 = time.perf_counter()
             # Connect to the database and fetch check data
-            conn = pymssql.connect(
-                server="ACAPP1",
-                user="titan",
-                password="titan",
-                database="titan",
-            )
+            conn = pymssql.connect(server="ACAPP1", user="titan", password="titan", database="titan")
 
             with conn.cursor(as_dict=True) as cur:
                 cur.execute("""
@@ -214,12 +212,7 @@ class InvoiceViewer(tk.Tk):
         def load_accounts():
             t0 = time.perf_counter()
             # Connect to the database and fetch check data
-            conn = pymssql.connect(
-                server="ACAPP1",
-                user="titan",
-                password="titan",
-                database="titan",
-            )
+            conn = pymssql.connect(server="ACAPP1", user="titan", password="titan", database="titan")
 
             with conn.cursor(as_dict=True) as cur:
                 cur.execute("""
@@ -237,12 +230,37 @@ class InvoiceViewer(tk.Tk):
             t1 = time.perf_counter()
             self.loading_update(f"Check data loaded in {t1 - t0:.2f} seconds.")
             conn.close()
+
+        def load_journals():
+            t0 = time.perf_counter()
+            conn = pymssql.connect(server="ACAPP1", user="titan", password="titan", database="titan")
+            with conn.cursor(as_dict=True) as cur:
+                cur.execute("""
+                    SELECT JournalID, SourceReferenceID, SourceDescription
+                    FROM GL_Journal_Detail_Source
+                    WHERE JournalID LIKE 'AP%' OR JournalID LIKE 'CD%'
+                """)
+                data = cur.fetchall()
+
+            for row in data:
+                jid = row["JournalID"]
+                invoice_num = str(row["SourceReferenceID"]).strip()
+                company_name = str(row["SourceDescription"]).strip()
+                
+                if jid.startswith("AP"):
+                    self.ap_by_company_invoice[(company_name, invoice_num)] = jid
+                elif jid.startswith("CD"):
+                    self.cd_by_company_check[(company_name, invoice_num)] = jid
+
+            conn.close()
+            t1 = time.perf_counter()
+            self.loading_update(f"Journal data loaded in {t1 - t0:.2f} seconds.")
         
-        
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             _ = pool.submit(load_header).result()
             _ = pool.submit(load_checks).result()
             _ = pool.submit(load_accounts).result()
+            _ = pool.submit(load_journals).result()
         t1 = time.perf_counter()
         self.loading_update(f"Database loaded in {t1 - self.t0:.2f} seconds.")
 
@@ -764,6 +782,9 @@ class InvoiceViewer(tk.Tk):
         self.checks_by_vendor_invoice.clear()
         self.accounts_by_vendor_invoice.clear()
         self.missing_invoices.clear()
+        self.account_description_by_account.clear()
+        self.ap_by_company_invoice.clear()
+        self.cd_by_company_invoice.clear()
 
         self.columnconfigure(0, weight=0)
         self.rowconfigure(0, weight=0)
@@ -1016,11 +1037,33 @@ class AutoCompleteEntry(tk.Entry):
             if vendor and invoice:
                 # Fetch full row data from the dictionary built during load
                 row_data = self.root.by_vendor_invoice.get((vendor, invoice))
-                if row_data and "RecordNum" in row_data:
-                    record_num = row_data["RecordNum"]
-                    # Add as disabled text, followed by a separator line
-                    menu.add_command(label=f"Record Number: {record_num}", state="disabled")
-                    menu.add_separator()
+                if row_data:
+                    company_name = str(row_data.get("CompanyName", "")).strip()
+
+                    # 1. Record Number
+                    if "RecordNum" in row_data:
+                        record_num = row_data["RecordNum"]
+                        menu.add_command(label=f"Record Number: {record_num}", state="disabled")
+
+                    # 2. AP Number
+                    ap_num = self.root.ap_by_company_invoice.get((company_name, invoice))
+                    if ap_num:
+                        menu.add_command(label=f"Journal ID: {ap_num}", state="disabled")
+
+                    # 3. CD Number(s) via Checks
+                    checks = self.root.checks_by_vendor_invoice.get((vendor, invoice), [])
+                    cd_nums = []
+                    for cnum, cdate, camt in checks:
+                        cd_num = self.root.cd_by_company_check.get((company_name, str(cnum).strip()))
+                        if cd_num and cd_num not in cd_nums:
+                            cd_nums.append(cd_num)
+
+                    for cd_num in cd_nums:
+                        menu.add_command(label=f"Journal ID: {cd_num}", state="disabled")
+
+                    # Add separator after informational headers
+                    if "RecordNum" in row_data or ap_num or cd_nums:
+                        menu.add_separator()
 
             value = self.tree.set(row, col_name)
             # Disable the cell copy if there's nothing meaningful to copy (blank / arrows / checkmark)
