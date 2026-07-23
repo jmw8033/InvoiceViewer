@@ -15,7 +15,7 @@ invoice_re = re.compile(r'(\d+)')
 class InvoiceViewer(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Titan Invoice Viewer")
+        self.title("Titan AP Invoice Viewer")
         self.iconbitmap(default="icon.ico")
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
@@ -69,9 +69,9 @@ class InvoiceViewer(tk.Tk):
         self.loading_canvas.background = self.loading_bg
         self.loading_canvas.create_image(1220/2, 0, anchor="n", image=self.loading_bg)
         
-        tk.Label(self.loading_canvas, text="Welcome to Titan Invoice Viewer", font=("TKDefaultFont", 24, "bold"), bg="white").pack(side="top", anchor="w")
+        tk.Label(self.loading_canvas, text="Welcome to Titan AP Invoice Viewer", font=("TKDefaultFont", 24, "bold"), bg="white").pack(side="top", anchor="w")
         tk.Label(self.loading_canvas, text="Please press the Help button for more information about this program", font=("TKDefaultFont", 20), bg="white").pack(side="top", anchor="w")
-        tk.Label(self.loading_canvas, text="Loading Titan invoices, Please wait...", font=("TKDefaultFont", 16), bg="white").pack(side="top", anchor="w")
+        tk.Label(self.loading_canvas, text="Loading Titan AP invoices, Please wait...", font=("TKDefaultFont", 16), bg="white").pack(side="top", anchor="w")
 
 
     def loading_update(self, msg, color="#000000"):
@@ -1432,7 +1432,7 @@ class HelpPopup(tk.Toplevel):
         def i(text): self.text.insert(tk.END, text + "\n", "indent")
         def f(text): self.text.insert(tk.END, text + "\n", "footer")
 
-        self.text.insert(tk.END, "Titan Invoice Viewer — Help\n", "title")
+        self.text.insert(tk.END, "Titan AP Invoice Viewer — Help\n", "title")
 
         h("GETTING STARTED")
         b("When the program opens it loads all invoice data from the Titan database and scans")
