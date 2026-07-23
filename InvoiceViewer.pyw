@@ -141,6 +141,53 @@ class InvoiceViewer(tk.Tk):
         self.bind("<Control-F9>", self.add_ignore)
         self.bind("<Control-F10>", self.toggle_ignore_list)
 
+        self.bind("<Control-F9>", self.add_ignore)
+        self.bind("<Control-F10>", self.toggle_ignore_list)
+
+        # Restore saved filters
+        if hasattr(self, "saved_filters") and self.saved_filters:
+            # Dropdowns & Checkboxes
+            self.date_filter_var.set(self.saved_filters["date_filter"])
+            self.plant_var.set(self.saved_filters["plant"])
+            self.all_companies.set(self.saved_filters["all_companies"])
+            self.search_names.set(self.saved_filters["search_names"])
+            self.pdf_only.set(self.saved_filters["pdf_only"])
+            
+            # Dates
+            self.start_entry.set_date(self.saved_filters["start_date"])
+            self.end_entry.set_date(self.saved_filters["end_date"])
+            
+            # Text Variables
+            self.invoice_text.set(self.saved_filters["invoice"])
+            self.account_text.set(self.saved_filters["account"])
+
+            # Sorting state
+            self.sort_col = self.saved_filters.get("sort_col", "Date")
+            self.sort_desc = self.saved_filters.get("sort_desc", True)
+            
+            # Main Search Bar and Trigger Search
+            if hasattr(self, "company_entry"):
+                # Remove active trace to stop premature searches
+                self.company_entry.company.trace_remove("write", self.company_entry.text_trace)
+                
+                # Insert saved text
+                self.company_entry.insert(0, self.saved_filters["search_target"])
+                
+                # Apply correct trace based on All Companies state
+                if self.all_companies.get():
+                    self.company_entry.text_trace = self.company_entry.company.trace_add(
+                        "write", lambda *_: self.company_entry.debounced_select(source="company")
+                    )
+                else:
+                    self.company_entry.text_trace = self.company_entry.company.trace_add(
+                        "write", self.company_entry.show_suggestions
+                    )
+                
+                # Trigger search manually
+                self.company_entry.on_select()
+                
+            self.saved_filters = None
+
 
     def log_usage(self):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -360,9 +407,10 @@ class InvoiceViewer(tk.Tk):
         self.pdf_cb.grid(row=0, column=9, padx=5)
 
         # Far right frame for buttons
-        ttk.Label(self.filter_frame, text="                                                                                ").grid(row=0, column=10) # Spacer
+        self.filter_frame.columnconfigure(10, weight=1)
+
         self.right_button_frame = ttk.Frame(self.filter_frame)
-        self.right_button_frame.grid(row=0, column=12, padx=35, sticky="e")
+        self.right_button_frame.grid(row=0, column=12, padx=(0, 15), sticky="e")
         # Refresh button
         self.refresh_button = tk.Button(self.right_button_frame, text="⭮", command=self.restart)
         self.refresh_button.pack(side="left", padx=2)
@@ -790,6 +838,28 @@ class InvoiceViewer(tk.Tk):
 
     
     def restart(self):
+        # Save current filters
+        try:
+            target_entry = getattr(self, "company_entry", None)
+            target_text = target_entry.get() if target_entry else ""
+            
+            self.saved_filters = {
+                "search_target": target_text,
+                "invoice": self.invoice_text.get(),
+                "account": self.account_text.get(),
+                "date_filter": self.date_filter_var.get(),
+                "start_date": self.start_entry.get_date(),
+                "end_date": self.end_entry.get_date(),
+                "plant": self.plant_var.get(),
+                "all_companies": self.all_companies.get(),
+                "search_names": self.search_names.get(),
+                "pdf_only": self.pdf_only.get(),
+                "sort_col": self.sort_col,
+                "sort_desc": self.sort_desc
+            }
+        except Exception:
+            self.saved_filters = None
+    
         # Save ignore json
         with open("ignore.json", "w") as f:
             json.dump(list(self.ignore_list), f)
